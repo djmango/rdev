@@ -1,10 +1,4 @@
-use crate::keycodes::macos::{
-    code_from_key,
-    virtual_keycodes::{
-        kVK_DownArrow, kVK_End, kVK_ForwardDelete, kVK_Help, kVK_Home, kVK_LeftArrow, kVK_PageDown,
-        kVK_PageUp, kVK_RightArrow, kVK_UpArrow,
-    },
-};
+use crate::keycodes::macos::{code_from_key, virtual_keycodes::*};
 use crate::macos::common::CGEventSourceKeyState;
 use crate::rdev::{Button, EventType, RawKey, SimulateError};
 use core_graphics::{
@@ -31,7 +25,19 @@ pub fn set_keyboard_extra_info(extra: i64) {
 #[allow(non_upper_case_globals)]
 fn workaround_fn(event: CGEvent, keycode: CGKeyCode) -> CGEvent {
     match keycode {
-        kVK_Help | kVK_ForwardDelete | kVK_Home | kVK_End | kVK_PageDown | kVK_PageUp => {
+        // https://github.com/rustdesk/rustdesk/issues/10126
+        // https://stackoverflow.com/questions/74938870/sticky-fn-after-home-is-simulated-programmatically-macos
+        // `kVK_F20` does not stick `CGEventFlags::CGEventFlagSecondaryFn`
+        kVK_F1 | kVK_F2 | kVK_F3 | kVK_F4 | kVK_F5 | kVK_F6 | kVK_F7 | kVK_F8 | kVK_F9
+        | kVK_F10 | kVK_F11 | kVK_F12 | kVK_F13 | kVK_F14 | kVK_F15 | kVK_F16 | kVK_F17
+        | kVK_F18 | kVK_F19 | kVK_ANSI_KeypadClear | kVK_ForwardDelete | kVK_Home
+        | kVK_End | kVK_PageDown | kVK_PageUp
+        | 129 // Spotlight Search
+        | 130 // Application
+        | 131 // Launchpad
+        | 144 // Brightness Up
+        | 145 // Brightness Down
+        => {
             let flags = event.get_flags();
             event.set_flags(flags & (!(CGEventFlags::CGEventFlagSecondaryFn)));
         }
@@ -41,6 +47,14 @@ fn workaround_fn(event: CGEvent, keycode: CGKeyCode) -> CGEvent {
                 flags
                     & (!(CGEventFlags::CGEventFlagSecondaryFn
                         | CGEventFlags::CGEventFlagNumericPad)),
+            );
+        }
+        kVK_Help => {
+            let flags = event.get_flags();
+            event.set_flags(
+                flags
+                    & (!(CGEventFlags::CGEventFlagSecondaryFn
+                        | CGEventFlags::CGEventFlagHelp)),
             );
         }
         _ => {}
@@ -57,7 +71,8 @@ unsafe fn convert_native_with_source(
             crate::Key::RawKey(rawkey) => {
                 if let RawKey::MacVirtualKeycode(keycode) = rawkey {
                     CGEvent::new_keyboard_event(source, *keycode as _, true)
-                        .and_then(|event| Ok(workaround_fn(event, *keycode)))
+                        // Don't use `workaround_fn()` for `KeyPress`, or `F11` will not work.
+                        // .and_then(|event| Ok(workaround_fn(event, *keycode)))
                         .ok()
                 } else {
                     None
@@ -66,7 +81,8 @@ unsafe fn convert_native_with_source(
             _ => {
                 let code = code_from_key(*key)?;
                 CGEvent::new_keyboard_event(source, code as _, true)
-                    .and_then(|event| Ok(workaround_fn(event, code as _)))
+                    // Don't use `workaround_fn()` for `KeyPress`, or `F11` will not work.
+                    // .and_then(|event| Ok(workaround_fn(event, code as _)))
                     .ok()
             }
         },

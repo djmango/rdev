@@ -69,6 +69,7 @@ pub fn convert(
         unicode,
         platform_code: code as _,
         position_code: code as _,
+        usb_hid: 0,
     })
 }
 

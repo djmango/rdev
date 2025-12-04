@@ -66,6 +66,7 @@ unsafe fn raw_callback(
                 unicode,
                 platform_code: code as _,
                 position_code: get_scan_code(lpdata),
+                usb_hid: 0,
                 extra_data: f_get_extra_data(lpdata),
             };
             if let Some(callback) = &mut GLOBAL_CALLBACK {

@@ -193,7 +193,6 @@ impl Keyboard {
         let mut buff = [0_u16; BUF_LEN];
         let kb_type = super::common::LMGetKbdType();
         let mut length = 0;
-        let last_dead_state = self.dead_state;
         let _retval = UCKeyTranslate(
             layout_ptr,
             code.try_into().ok()?,
@@ -209,24 +208,16 @@ impl Keyboard {
         if !keyboard.is_null() {
             CFRelease(keyboard);
         }
-        let mut cur_is_dead = self.is_dead();
-        if last_dead_state == 0 {
-            if self.dead_state != 0 {
-                return Some(UnicodeInfo {
+        if length == 0 {
+            return if self.is_dead() {
+                Some(UnicodeInfo {
                     name: None,
                     unicode: Vec::new(),
-                    is_dead: cur_is_dead,
-                });
-            }
-        } else {
-            if self.dead_state != 0 {
-                cur_is_dead = false;
-            }
-        }
-        // println!("{:?}", now.elapsed());
-
-        if length == 0 {
-            return None;
+                    is_dead: true,
+                })
+            } else {
+                None
+            };
         }
 
         // C0 controls
@@ -247,7 +238,7 @@ impl Keyboard {
         Some(UnicodeInfo {
             name: String::from_utf16(&unicode).ok(),
             unicode,
-            is_dead: cur_is_dead,
+            is_dead: false,
         })
     }
 
@@ -296,7 +287,7 @@ impl KeyboardState for Keyboard {
 #[allow(clippy::identity_op)]
 pub unsafe fn flags_to_state(flags: u64) -> ModifierState {
     let has_alt = flags & NSEventModifierFlagOption;
-    // let has_caps_lock = flags & NSEventModifierFlagCapsLock;
+    let has_caps_lock = flags & NSEventModifierFlagCapsLock;
     let has_control = flags & NSEventModifierFlagControl;
     let has_shift = flags & NSEventModifierFlagShift;
     let has_meta = flags & NSEventModifierFlagCommand;
@@ -304,9 +295,9 @@ pub unsafe fn flags_to_state(flags: u64) -> ModifierState {
     if has_alt != 0 {
         modifier |= optionKey;
     }
-    // if has_caps_lock != 0 {
-    //     modifier += CAPS_LOCK_BIT;
-    // }
+    if has_caps_lock != 0 {
+        modifier |= alphaLock;
+    }
     if has_control != 0 {
         modifier |= controlKey
     }
