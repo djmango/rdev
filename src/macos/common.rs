@@ -69,11 +69,10 @@ pub fn map_keycode(code: CGKeyCode) -> CGKeyCode {
 }
 
 pub fn set_is_main_thread(b: bool) {
-    if let Ok(mut guard) = KEYBOARD_STATE.lock() {
-        if let Some(keyboard_state) = guard.as_mut() {
+    if let Ok(mut guard) = KEYBOARD_STATE.lock()
+        && let Some(keyboard_state) = guard.as_mut() {
             keyboard_state.set_is_main_thread(b);
         }
-    }
 }
 
 #[inline]

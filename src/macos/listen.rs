@@ -22,8 +22,8 @@ unsafe extern "C-unwind" fn raw_callback(
     _user_info: *mut c_void,
 ) -> *mut CGEvent {
     let opt = KEYBOARD_STATE.lock();
-    if let Ok(mut guard) = opt {
-        if let Some(keyboard) = guard.as_mut() {
+    if let Ok(mut guard) = opt
+        && let Some(keyboard) = guard.as_mut() {
             unsafe {
                 if let Some(event) = convert(_type, cg_event, keyboard) {
                     // Reborrowing the global callback pointer.
@@ -34,7 +34,6 @@ unsafe extern "C-unwind" fn raw_callback(
                 }
             }
         }
-    }
     cg_event.as_ptr()
 }
 
