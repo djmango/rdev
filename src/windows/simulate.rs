@@ -1,5 +1,6 @@
 use crate::rdev::{Button, EventType, RawKey, SimulateError};
 use crate::keycodes::windows::{get_win_codes, scancode_from_key};
+use crate::windows::common::WHEEL_DELTA;
 use crate::Key;
 use std::convert::TryFrom;
 use std::mem::size_of;
@@ -15,7 +16,6 @@ use winapi::um::winuser::{
     MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE,
     MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL,
     MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
-    WHEEL_DELTA,
 };
 /// Not defined in win32 but define here for clarity
 #[allow(dead_code)]
