@@ -64,6 +64,8 @@ pub const kCGEventMaskForAllEvents: u64 = (1 << CGEventType::LeftMouseDown as u6
     + (1 << CGEventType::LeftMouseUp as u64)
     + (1 << CGEventType::RightMouseDown as u64)
     + (1 << CGEventType::RightMouseUp as u64)
+    + (1 << CGEventType::OtherMouseDown as u64)
+    + (1 << CGEventType::OtherMouseUp as u64)
     + (1 << CGEventType::MouseMoved as u64)
     + (1 << CGEventType::LeftMouseDragged as u64)
     + (1 << CGEventType::RightMouseDragged as u64)
@@ -168,6 +170,18 @@ pub unsafe fn convert(
         CGEventType::LeftMouseUp => Some(EventType::ButtonRelease(Button::Left)),
         CGEventType::RightMouseDown => Some(EventType::ButtonPress(Button::Right)),
         CGEventType::RightMouseUp => Some(EventType::ButtonRelease(Button::Right)),
+        CGEventType::OtherMouseDown => {
+            match cg_event.get_integer_value_field(EventField::MOUSE_EVENT_BUTTON_NUMBER) {
+                2 => Some(EventType::ButtonPress(Button::Middle)),
+                event => Some(EventType::ButtonPress(Button::Unknown(event as u8))),
+            }
+        }
+        CGEventType::OtherMouseUp => {
+            match cg_event.get_integer_value_field(EventField::MOUSE_EVENT_BUTTON_NUMBER) {
+                2 => Some(EventType::ButtonRelease(Button::Middle)),
+                event => Some(EventType::ButtonRelease(Button::Unknown(event as u8))),
+            }
+        }
         CGEventType::MouseMoved => {
             let point = cg_event.location();
             Some(EventType::MouseMove {
@@ -208,12 +222,21 @@ pub unsafe fn convert(
             EventType::KeyPress(..) => {
                 let code =
                     cg_event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u32;
-                let flags = cg_event.get_flags();
-                let s = keyboard_state.create_unicode_for_key(code, flags);
-                // if s.is_none() {
-                //     s = Some(key_to_name(_k).to_owned())
-                // }
-                s
+                #[allow(non_upper_case_globals)]
+                let skip_unicode = match code as CGKeyCode {
+                    kVK_Shift | kVK_RightShift | kVK_ForwardDelete => true,
+                    _ => false,
+                };
+                if skip_unicode {
+                    None
+                } else {
+                    let flags = cg_event.get_flags();
+                    let s = keyboard_state.create_unicode_for_key(code, flags);
+                    // if s.is_none() {
+                    //     s = Some(key_to_name(_k).to_owned())
+                    // }
+                    s
+                }
             }
             EventType::KeyRelease(..) => None,
             _ => None,
@@ -224,6 +247,7 @@ pub unsafe fn convert(
             unicode,
             platform_code: code as _,
             position_code: 0 as _,
+            usb_hid: 0,
             extra_data: cg_event.get_integer_value_field(EventField::EVENT_SOURCE_USER_DATA),
         });
     }

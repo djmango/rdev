@@ -351,6 +351,7 @@ pub struct Event {
     // WIndows: vkcod
     pub platform_code: u32,
     pub position_code: u32,
+    pub usb_hid: u32,
     #[cfg(target_os = "windows")]
     pub extra_data: winapi::shared::basetsd::ULONG_PTR,
     #[cfg(target_os = "macos")]

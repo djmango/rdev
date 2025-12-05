@@ -1,6 +1,9 @@
 use rdev::{EventType, Key, Keyboard, KeyboardState};
 
 fn main() {
+    #[cfg(target_os = "windows")]
+    let mut keyboard = Keyboard::new();
+    #[cfg(not(target_os = "windows"))]
     let mut keyboard = Keyboard::new().unwrap();
     let char_s = keyboard
         .add(&EventType::KeyPress(Key::KeyS))

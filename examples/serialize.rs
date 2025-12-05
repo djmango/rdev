@@ -5,13 +5,15 @@ fn main() {
     let event = Event {
         event_type: EventType::KeyPress(Key::KeyS),
         time: SystemTime::now(),
-        unicode: UnicodeInfo {
+        unicode: Some(UnicodeInfo {
             name: Some(String::from("S")),
             unicode: Vec::new(),
             is_dead: false,
-        },
+        }),
         platform_code: 0,
         position_code: 0,
+        usb_hid: 0,
+        extra_data: 0 as _,
     };
 
     let serialized = serde_json::to_string(&event).unwrap();

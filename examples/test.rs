@@ -40,6 +40,7 @@ fn convert_event(key: RdevKey, is_press: bool) -> Event {
         unicode: None,
         platform_code: linux_keycode_from_key(key).unwrap_or_default() as _,
         position_code: linux_keycode_from_key(key).unwrap_or_default() as _,
+        usb_hid: 0,
     }
 }
 
