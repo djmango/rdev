@@ -89,8 +89,7 @@ unsafe fn convert_native_with_source(
         EventType::KeyRelease(key) => match key {
             crate::Key::RawKey(rawkey) => {
                 if let RawKey::MacVirtualKeycode(keycode) = rawkey {
-                    CGEvent::new_keyboard_event(source, *keycode as _, false)
-                        .and_then(|event| Ok(workaround_fn(event, *keycode)))
+                    CGEvent::new_keyboard_event(source, *keycode as _, false).map(|event| workaround_fn(event, *keycode))
                         .ok()
                 } else {
                     None
@@ -98,13 +97,12 @@ unsafe fn convert_native_with_source(
             }
             _ => {
                 let code = code_from_key(*key)?;
-                CGEvent::new_keyboard_event(source, code as _, false)
-                    .and_then(|event| Ok(workaround_fn(event, code as _)))
+                CGEvent::new_keyboard_event(source, code as _, false).map(|event| workaround_fn(event, code as _))
                     .ok()
             }
         },
         EventType::ButtonPress(button) => {
-            let point = get_current_mouse_location()?;
+            let point = unsafe { get_current_mouse_location()? };
             let event = match button {
                 Button::Left => CGEventType::LeftMouseDown,
                 Button::Right => CGEventType::RightMouseDown,
@@ -119,7 +117,7 @@ unsafe fn convert_native_with_source(
             .ok()
         }
         EventType::ButtonRelease(button) => {
-            let point = get_current_mouse_location()?;
+            let point = unsafe { get_current_mouse_location()? };
             let event = match button {
                 Button::Left => CGEventType::LeftMouseUp,
                 Button::Right => CGEventType::RightMouseUp,
@@ -156,7 +154,7 @@ unsafe fn convert_native_with_source(
 unsafe fn convert_native(event_type: &EventType) -> Option<CGEvent> {
     // https://developer.apple.com/documentation/coregraphics/cgeventsourcestateid#:~:text=kCGEventSourceStatePrivate
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).ok()?;
-    convert_native_with_source(event_type, source)
+    unsafe { convert_native_with_source(event_type, source) }
 }
 
 unsafe fn get_current_mouse_location() -> Option<CGPoint> {

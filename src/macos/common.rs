@@ -76,7 +76,7 @@ pub const kCGEventMaskForAllEvents: u64 = (1 << CGEventType::LeftMouseDown as u6
 
 #[cfg(target_os = "macos")]
 #[link(name = "Cocoa", kind = "framework")]
-extern "C" {
+unsafe extern "C" {
     #[allow(improper_ctypes)]
     pub fn CGEventTapCreate(
         tap: CGEventTapLocation,
@@ -105,7 +105,7 @@ extern "C" {
 #[allow(improper_ctypes)]
 #[allow(non_snake_case)]
 #[link(name = "Carbon", kind = "framework")]
-extern "C" {
+unsafe extern "C" {
     pub fn LMGetKbdType() -> u8;
     pub fn KBGetLayoutType(iKeyboardType: SInt16) -> PhysicalKeyboardLayoutType;
 }
@@ -190,22 +190,24 @@ pub unsafe fn convert(
             })
         }
         CGEventType::KeyDown => {
-            code = get_code(cg_event)?;
+            code = unsafe { get_code(cg_event)? };
             Some(EventType::KeyPress(key_from_code(code)))
         }
         CGEventType::KeyUp => {
-            code = get_code(cg_event)?;
+            code = unsafe { get_code(cg_event)? };
             Some(EventType::KeyRelease(key_from_code(code)))
         }
         CGEventType::FlagsChanged => {
-            code = get_code(cg_event)?;
+            code = unsafe { get_code(cg_event)? };
             let flags = cg_event.get_flags();
-            if flags < LAST_FLAGS {
-                LAST_FLAGS = flags;
-                Some(EventType::KeyRelease(key_from_code(code)))
-            } else {
-                LAST_FLAGS = flags;
-                Some(EventType::KeyPress(key_from_code(code)))
+            unsafe {
+                if flags < LAST_FLAGS {
+                    LAST_FLAGS = flags;
+                    Some(EventType::KeyRelease(key_from_code(code)))
+                } else {
+                    LAST_FLAGS = flags;
+                    Some(EventType::KeyPress(key_from_code(code)))
+                }
             }
         }
         CGEventType::ScrollWheel => {
@@ -223,19 +225,16 @@ pub unsafe fn convert(
                 let code =
                     cg_event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u32;
                 #[allow(non_upper_case_globals)]
-                let skip_unicode = match code as CGKeyCode {
-                    kVK_Shift | kVK_RightShift | kVK_ForwardDelete => true,
-                    _ => false,
-                };
+                let skip_unicode = matches!(code as CGKeyCode, kVK_Shift | kVK_RightShift | kVK_ForwardDelete);
                 if skip_unicode {
                     None
                 } else {
                     let flags = cg_event.get_flags();
-                    let s = keyboard_state.create_unicode_for_key(code, flags);
+                    
                     // if s.is_none() {
                     //     s = Some(key_to_name(_k).to_owned())
                     // }
-                    s
+                    unsafe { keyboard_state.create_unicode_for_key(code, flags) }
                 }
             }
             EventType::KeyRelease(..) => None,

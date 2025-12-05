@@ -16,17 +16,15 @@ unsafe extern "C" fn raw_callback(
 ) -> CGEventRef {
     // println!("Event ref {:?}", cg_event_ptr);
     // let cg_event: CGEvent = transmute_copy::<*mut c_void, CGEvent>(&cg_event_ptr);
-    if let Ok(mut state) = KEYBOARD_STATE.lock() {
-        if let Some(keyboard) = state.as_mut() {
-            if let Some(event) = convert(_type, &cg_event, keyboard) {
-                if let Some(callback) = &mut GLOBAL_CALLBACK {
-                    if callback(event).is_none() {
+    if let Ok(mut state) = KEYBOARD_STATE.lock()
+        && let Some(keyboard) = state.as_mut()
+            && let Some(event) = unsafe { convert(_type, &cg_event, keyboard) } {
+                let callback_ptr = &raw mut GLOBAL_CALLBACK;
+                if let Some(callback) = unsafe { (*callback_ptr).as_mut() }
+                    && callback(event).is_none() {
                         cg_event.set_type(CGEventType::Null);
                     }
-                }
             }
-        }
-    }
     cg_event
 }
 
