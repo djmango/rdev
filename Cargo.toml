@@ -1,8 +1,8 @@
 [package]
-authors = ["Nicolas Patry <patry.nicolas@protonmail.com>"]
-edition = "2018"
+authors = ["Nicolas Patry <patry.nicolas@protonmail.com>, Sulaiman Khan Ghori <sulaiman.ghori@outlook.com"]
+edition = "2024"
 name = "rdev"
-version = "0.5.0-2"
+version = "0.6.0"
 
 categories = ["development-tools::testing", "api-bindings", "hardware-support"]
 description = "Listen and send keyboard and mouse events on Windows, Linux and MacOS."
