@@ -36,7 +36,8 @@ lazy_static::lazy_static! {
 
 fn main() {
     // This will block.
-    std::env::set_var("KEYBOARD_ONLY", "y");
+    // SAFETY: This is single-threaded example code, no race conditions possible
+    unsafe { std::env::set_var("KEYBOARD_ONLY", "y") };
 
     let mut keyboard = KEYBOARD.lock().unwrap();
     let func = move |evt: Event| {

@@ -17,7 +17,7 @@ fn send(event_type: &EventType) {
 fn test_macos_keys() {
     let virtual_input = rdev::VirtualInput::new(
         rdev::CGEventSourceStateID::Private,
-        rdev::CGEventTapLocation::Session,
+        rdev::CGEventTapLocation::SessionEventTap,
     )
     .unwrap();
 

@@ -2,27 +2,15 @@
 use crate::keycodes::macos::virtual_keycodes::*;
 use crate::macos::keyboard::Keyboard;
 use crate::rdev::{Button, Event, EventType, Key};
-use cocoa::base::id;
-use core_graphics::{
-    event::{CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, CGKeyCode, EventField},
-    event_source::CGEventSourceStateID,
-};
 use lazy_static::lazy_static;
+use objc2_core_graphics::{CGEvent, CGEventField, CGEventFlags, CGEventType, CGKeyCode};
 use std::convert::TryInto;
-use std::os::raw::c_void;
+use std::ptr::NonNull;
 use std::sync::Mutex;
 use std::time::SystemTime;
 
 use crate::keycodes::macos::key_from_code;
 
-pub type CFMachPortRef = *const c_void;
-pub type CFIndex = u64;
-pub type CFAllocatorRef = id;
-pub type CFRunLoopSourceRef = id;
-pub type CFRunLoopRef = id;
-pub type CFRunLoopMode = id;
-pub type CGEventTapProxy = id;
-pub type CGEventRef = CGEvent;
 pub type FourCharCode = ::std::os::raw::c_uint;
 pub type OSType = FourCharCode;
 pub type PhysicalKeyboardLayoutType = OSType;
@@ -39,67 +27,9 @@ pub const kKeyboardISO: PhysicalKeyboardLayoutType = 1230196512;
 #[allow(non_upper_case_globals, dead_code)]
 pub const kKeyboardUnknown: PhysicalKeyboardLayoutType = 1061109567;
 
-// https://developer.apple.com/documentation/coregraphics/cgeventtapplacement?language=objc
-pub type CGEventTapPlacement = u32;
-#[allow(non_upper_case_globals)]
-pub const kCGHeadInsertEventTap: u32 = 0;
-
-// https://developer.apple.com/documentation/coregraphics/cgeventtapoptions?language=objc
-#[allow(non_upper_case_globals)]
-#[repr(u32)]
-pub enum CGEventTapOption {
-    Default = 0,
-    ListenOnly = 1,
-}
-
-pub static mut LAST_FLAGS: CGEventFlags = CGEventFlags::CGEventFlagNull;
 lazy_static! {
+    pub static ref LAST_FLAGS: Mutex<CGEventFlags> = Mutex::new(CGEventFlags(0));
     pub static ref KEYBOARD_STATE: Mutex<Option<Keyboard>> = Mutex::new(Keyboard::new());
-}
-
-// https://developer.apple.com/documentation/coregraphics/cgeventmask?language=objc
-pub type CGEventMask = u64;
-#[allow(non_upper_case_globals)]
-pub const kCGEventMaskForAllEvents: u64 = (1 << CGEventType::LeftMouseDown as u64)
-    + (1 << CGEventType::LeftMouseUp as u64)
-    + (1 << CGEventType::RightMouseDown as u64)
-    + (1 << CGEventType::RightMouseUp as u64)
-    + (1 << CGEventType::OtherMouseDown as u64)
-    + (1 << CGEventType::OtherMouseUp as u64)
-    + (1 << CGEventType::MouseMoved as u64)
-    + (1 << CGEventType::LeftMouseDragged as u64)
-    + (1 << CGEventType::RightMouseDragged as u64)
-    + (1 << CGEventType::KeyDown as u64)
-    + (1 << CGEventType::KeyUp as u64)
-    + (1 << CGEventType::FlagsChanged as u64)
-    + (1 << CGEventType::ScrollWheel as u64);
-
-#[cfg(target_os = "macos")]
-#[link(name = "Cocoa", kind = "framework")]
-unsafe extern "C" {
-    #[allow(improper_ctypes)]
-    pub fn CGEventTapCreate(
-        tap: CGEventTapLocation,
-        place: CGEventTapPlacement,
-        options: CGEventTapOption,
-        eventsOfInterest: CGEventMask,
-        callback: QCallback,
-        user_info: id,
-    ) -> CFMachPortRef;
-    pub fn CGEventSourceKeyState(state_id: CGEventSourceStateID, key: CGKeyCode) -> bool;
-    pub fn CFMachPortCreateRunLoopSource(
-        allocator: CFAllocatorRef,
-        tap: CFMachPortRef,
-        order: CFIndex,
-    ) -> CFRunLoopSourceRef;
-    pub fn CFRunLoopGetCurrent() -> CFRunLoopRef;
-    pub fn CFRunLoopAddSource(rl: CFRunLoopRef, source: CFRunLoopSourceRef, mode: CFRunLoopMode);
-    pub fn CFRunLoopGetMain() -> CFRunLoopRef;
-    pub fn CGEventTapEnable(tap: CFMachPortRef, enable: bool);
-    pub fn CFRunLoopRun();
-    pub fn CFRunLoopStop(rl: CFRunLoopRef);
-
-    pub static kCFRunLoopCommonModes: CFRunLoopMode;
 }
 
 #[allow(improper_ctypes)]
@@ -109,13 +39,6 @@ unsafe extern "C" {
     pub fn LMGetKbdType() -> u8;
     pub fn KBGetLayoutType(iKeyboardType: SInt16) -> PhysicalKeyboardLayoutType;
 }
-
-pub type QCallback = unsafe extern "C" fn(
-    proxy: CGEventTapProxy,
-    _type: CGEventType,
-    cg_event: CGEventRef,
-    user_info: *mut c_void,
-) -> CGEventRef;
 
 #[cfg(target_os = "macos")]
 #[inline]
@@ -146,109 +69,130 @@ pub fn map_keycode(code: CGKeyCode) -> CGKeyCode {
 }
 
 pub fn set_is_main_thread(b: bool) {
-    if let Some(keyboard_state) = KEYBOARD_STATE.lock().unwrap().as_mut() {
-        keyboard_state.set_is_main_thread(b);
+    if let Ok(mut guard) = KEYBOARD_STATE.lock() {
+        if let Some(keyboard_state) = guard.as_mut() {
+            keyboard_state.set_is_main_thread(b);
+        }
     }
 }
 
 #[inline]
 unsafe fn get_code(cg_event: &CGEvent) -> Option<CGKeyCode> {
-    cg_event
-        .get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE)
+    CGEvent::integer_value_field(Some(cg_event), CGEventField::KeyboardEventKeycode)
         .try_into()
         .ok()
 }
 
 pub unsafe fn convert(
     _type: CGEventType,
-    cg_event: &CGEvent,
+    cg_event: NonNull<CGEvent>,
     keyboard_state: &mut Keyboard,
 ) -> Option<Event> {
-    let mut code = 0;
-    let option_type = match _type {
-        CGEventType::LeftMouseDown => Some(EventType::ButtonPress(Button::Left)),
-        CGEventType::LeftMouseUp => Some(EventType::ButtonRelease(Button::Left)),
-        CGEventType::RightMouseDown => Some(EventType::ButtonPress(Button::Right)),
-        CGEventType::RightMouseUp => Some(EventType::ButtonRelease(Button::Right)),
-        CGEventType::OtherMouseDown => {
-            match cg_event.get_integer_value_field(EventField::MOUSE_EVENT_BUTTON_NUMBER) {
-                2 => Some(EventType::ButtonPress(Button::Middle)),
-                event => Some(EventType::ButtonPress(Button::Unknown(event as u8))),
+    unsafe {
+        let cg_event_ref = cg_event.as_ref();
+        let mut code: CGKeyCode = 0;
+        let option_type = match _type {
+            CGEventType::LeftMouseDown => Some(EventType::ButtonPress(Button::Left)),
+            CGEventType::LeftMouseUp => Some(EventType::ButtonRelease(Button::Left)),
+            CGEventType::RightMouseDown => Some(EventType::ButtonPress(Button::Right)),
+            CGEventType::RightMouseUp => Some(EventType::ButtonRelease(Button::Right)),
+            CGEventType::OtherMouseDown => {
+                match CGEvent::integer_value_field(
+                    Some(cg_event_ref),
+                    CGEventField::MouseEventButtonNumber,
+                ) {
+                    2 => Some(EventType::ButtonPress(Button::Middle)),
+                    event => Some(EventType::ButtonPress(Button::Unknown(event as u8))),
+                }
             }
-        }
-        CGEventType::OtherMouseUp => {
-            match cg_event.get_integer_value_field(EventField::MOUSE_EVENT_BUTTON_NUMBER) {
-                2 => Some(EventType::ButtonRelease(Button::Middle)),
-                event => Some(EventType::ButtonRelease(Button::Unknown(event as u8))),
+            CGEventType::OtherMouseUp => {
+                match CGEvent::integer_value_field(
+                    Some(cg_event_ref),
+                    CGEventField::MouseEventButtonNumber,
+                ) {
+                    2 => Some(EventType::ButtonRelease(Button::Middle)),
+                    event => Some(EventType::ButtonRelease(Button::Unknown(event as u8))),
+                }
             }
-        }
-        CGEventType::MouseMoved => {
-            let point = cg_event.location();
-            Some(EventType::MouseMove {
-                x: point.x,
-                y: point.y,
-            })
-        }
-        CGEventType::KeyDown => {
-            code = unsafe { get_code(cg_event)? };
-            Some(EventType::KeyPress(key_from_code(code)))
-        }
-        CGEventType::KeyUp => {
-            code = unsafe { get_code(cg_event)? };
-            Some(EventType::KeyRelease(key_from_code(code)))
-        }
-        CGEventType::FlagsChanged => {
-            code = unsafe { get_code(cg_event)? };
-            let flags = cg_event.get_flags();
-            unsafe {
-                if flags < LAST_FLAGS {
-                    LAST_FLAGS = flags;
+            CGEventType::MouseMoved | CGEventType::LeftMouseDragged | CGEventType::RightMouseDragged => {
+                let point = CGEvent::location(Some(cg_event_ref));
+                Some(EventType::MouseMove {
+                    x: point.x,
+                    y: point.y,
+                })
+            }
+            CGEventType::KeyDown => {
+                code = get_code(cg_event_ref)?;
+                Some(EventType::KeyPress(key_from_code(code)))
+            }
+            CGEventType::KeyUp => {
+                code = get_code(cg_event_ref)?;
+                Some(EventType::KeyRelease(key_from_code(code)))
+            }
+            CGEventType::FlagsChanged => {
+                code = get_code(cg_event_ref)?;
+                let flags = CGEvent::flags(Some(cg_event_ref));
+                let mut global_flags = LAST_FLAGS.lock().unwrap();
+                if flags < *global_flags {
+                    *global_flags = flags;
                     Some(EventType::KeyRelease(key_from_code(code)))
                 } else {
-                    LAST_FLAGS = flags;
+                    *global_flags = flags;
                     Some(EventType::KeyPress(key_from_code(code)))
                 }
             }
-        }
-        CGEventType::ScrollWheel => {
-            let delta_y =
-                cg_event.get_integer_value_field(EventField::SCROLL_WHEEL_EVENT_POINT_DELTA_AXIS_1);
-            let delta_x =
-                cg_event.get_integer_value_field(EventField::SCROLL_WHEEL_EVENT_POINT_DELTA_AXIS_2);
-            Some(EventType::Wheel { delta_x: delta_x as f64, delta_y: delta_y as f64 })
-        }
-        _ => None,
-    };
-    if let Some(event_type) = option_type {
-        let unicode = match event_type {
-            EventType::KeyPress(..) => {
-                let code =
-                    cg_event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u32;
-                #[allow(non_upper_case_globals)]
-                let skip_unicode = matches!(code as CGKeyCode, kVK_Shift | kVK_RightShift | kVK_ForwardDelete);
-                if skip_unicode {
-                    None
-                } else {
-                    let flags = cg_event.get_flags();
-                    
-                    // if s.is_none() {
-                    //     s = Some(key_to_name(_k).to_owned())
-                    // }
-                    unsafe { keyboard_state.create_unicode_for_key(code, flags) }
-                }
+            CGEventType::ScrollWheel => {
+                let delta_y = CGEvent::integer_value_field(
+                    Some(cg_event_ref),
+                    CGEventField::ScrollWheelEventPointDeltaAxis1,
+                );
+                let delta_x = CGEvent::integer_value_field(
+                    Some(cg_event_ref),
+                    CGEventField::ScrollWheelEventPointDeltaAxis2,
+                );
+                Some(EventType::Wheel {
+                    delta_x: delta_x as f64,
+                    delta_y: delta_y as f64,
+                })
             }
-            EventType::KeyRelease(..) => None,
             _ => None,
         };
-        return Some(Event {
-            event_type,
-            time: SystemTime::now(),
-            unicode,
-            platform_code: code as _,
-            position_code: 0 as _,
-            usb_hid: 0,
-            extra_data: cg_event.get_integer_value_field(EventField::EVENT_SOURCE_USER_DATA),
-        });
+        if let Some(event_type) = option_type {
+            let unicode = match event_type {
+                EventType::KeyPress(..) => {
+                    let key_code = CGEvent::integer_value_field(
+                        Some(cg_event_ref),
+                        CGEventField::KeyboardEventKeycode,
+                    ) as u32;
+                    #[allow(non_upper_case_globals)]
+                    let skip_unicode = matches!(
+                        key_code as CGKeyCode,
+                        kVK_Shift | kVK_RightShift | kVK_ForwardDelete
+                    );
+                    if skip_unicode {
+                        None
+                    } else {
+                        let flags = CGEvent::flags(Some(cg_event_ref));
+                        keyboard_state.create_unicode_for_key(key_code, flags)
+                    }
+                }
+                EventType::KeyRelease(..) => None,
+                _ => None,
+            };
+            let extra_data = CGEvent::integer_value_field(
+                Some(cg_event_ref),
+                CGEventField::EventSourceUserData,
+            );
+            return Some(Event {
+                event_type,
+                time: SystemTime::now(),
+                unicode,
+                platform_code: code as _,
+                position_code: 0 as _,
+                usb_hid: 0,
+                extra_data,
+            });
+        }
     }
     None
 }

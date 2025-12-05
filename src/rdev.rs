@@ -239,6 +239,12 @@ pub enum Key {
     VolumeUp,
     VolumeDown,
     VolumeMute,
+    MediaNextTrack,
+    MediaPrevTrack,
+    MediaPlayPause,
+    BrowserSearch,
+    LaunchMail,
+    LaunchApp2, // Calculator
     Lang1, // Korean Hangul/English toggle key, and as the Kana key on the Apple Japanese keyboard.
     Lang2, // Korean Hanja conversion key, and as the Eisu key on the Apple Japanese keyboard.
     Lang3, // Japanese Katakana key.

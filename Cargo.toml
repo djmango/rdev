@@ -28,11 +28,13 @@ serialize = ["serde"]
 # unstable_wayland = ["uinput"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
-cocoa = "0.26"
 core-foundation = {version = "0.10"}
-core-foundation-sys = {version = "0.8.3"}
-core-graphics = {version = "0.25", features = ["highsierra"]}
+core-foundation-sys = {version = "0.8"}
 dispatch = "0.2"
+objc2-foundation = "0.3.1"
+objc2-core-graphics = "0.3.1"
+objc2-core-foundation = "0.3.1"
+objc2 = "0.6.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 epoll = {version = "4.1.0"}

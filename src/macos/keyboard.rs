@@ -4,7 +4,7 @@ use crate::rdev::{EventType, Key, KeyboardState, UnicodeInfo};
 use core_foundation::base::{CFRelease, OSStatus};
 use core_foundation::string::UniChar;
 use core_foundation_sys::data::CFDataGetBytePtr;
-use core_graphics::event::CGEventFlags;
+use objc2_core_graphics::CGEventFlags;
 use std::convert::TryInto;
 use std::ffi::c_void;
 use std::os::raw::c_uint;
@@ -59,6 +59,7 @@ lazy_static::lazy_static! {
 }
 
 #[cfg(target_os = "macos")]
+#[allow(clippy::duplicated_attributes)]
 #[link(name = "Cocoa", kind = "framework")]
 #[link(name = "Carbon", kind = "framework")]
 unsafe extern "C" {
@@ -125,7 +126,8 @@ impl Keyboard {
         code: u32,
         flags: CGEventFlags,
     ) -> Option<UnicodeInfo> {
-        let flags_bits = flags.bits();
+        // CGEventFlags is a newtype around u64 in objc2
+        let flags_bits = flags.0;
         if flags_bits & NSEventModifierFlagCommand != 0
             || flags_bits & NSEventModifierFlagControl != 0
         {
@@ -150,7 +152,6 @@ impl Keyboard {
         code: u32,
         modifier_state: ModifierState,
     ) -> Option<UnicodeInfo> {
-        // let mut now = std::time::Instant::now();
         let mut keyboard = unsafe { TISCopyCurrentKeyboardInputSource() };
         let mut layout = std::ptr::null_mut();
         if !keyboard.is_null() {
@@ -188,7 +189,6 @@ impl Keyboard {
             }
             return None;
         }
-        // println!("{:?}", now.elapsed());
 
         let mut buff = [0_u16; BUF_LEN];
         let kb_type = unsafe { super::common::LMGetKbdType() };

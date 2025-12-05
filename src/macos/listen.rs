@@ -1,68 +1,78 @@
 #![allow(improper_ctypes_definitions)]
 use crate::macos::common::*;
 use crate::rdev::{Event, ListenError};
-use cocoa::base::nil;
-use cocoa::foundation::NSAutoreleasePool;
-use core_graphics::event::{CGEventTapLocation, CGEventType};
+use objc2_core_foundation::{CFMachPort, CFRunLoop, kCFRunLoopCommonModes};
+use objc2_core_graphics::{
+    CGEvent, CGEventTapCallBack, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
+    CGEventTapProxy, CGEventType, kCGEventMaskForAllEvents,
+};
+use objc2_foundation::NSAutoreleasePool;
 use std::os::raw::c_void;
+use std::ptr::{null_mut, NonNull};
 
 static mut GLOBAL_CALLBACK: Option<Box<dyn FnMut(Event)>> = None;
 
-unsafe extern "C" fn raw_callback(
+#[link(name = "Cocoa", kind = "framework")]
+unsafe extern "C" {}
+
+unsafe extern "C-unwind" fn raw_callback(
     _proxy: CGEventTapProxy,
     _type: CGEventType,
-    cg_event: CGEventRef,
+    cg_event: NonNull<CGEvent>,
     _user_info: *mut c_void,
-) -> CGEventRef {
-    // println!("Event ref {:?}", cg_event_ptr);
-    // let cg_event: CGEvent = transmute_copy::<*mut c_void, CGEvent>(&cg_event_ptr);
-    if let Ok(mut state) = KEYBOARD_STATE.lock()
-        && let Some(keyboard) = state.as_mut()
-            && let Some(event) = unsafe { convert(_type, &cg_event, keyboard) } {
-                let callback_ptr = &raw mut GLOBAL_CALLBACK;
-                if let Some(callback) = unsafe { (*callback_ptr).as_mut() } {
-                    callback(event);
+) -> *mut CGEvent {
+    let opt = KEYBOARD_STATE.lock();
+    if let Ok(mut guard) = opt {
+        if let Some(keyboard) = guard.as_mut() {
+            unsafe {
+                if let Some(event) = convert(_type, cg_event, keyboard) {
+                    // Reborrowing the global callback pointer.
+                    let ptr = &raw mut GLOBAL_CALLBACK;
+                    if let Some(callback) = &mut *ptr {
+                        callback(event);
+                    }
                 }
             }
-    // println!("Event ref END {:?}", cg_event_ptr);
-    // cg_event_ptr
-    cg_event
+        }
+    }
+    cg_event.as_ptr()
 }
 
 pub fn listen<T>(callback: T) -> Result<(), ListenError>
 where
     T: FnMut(Event) + 'static,
 {
-    let mut types = kCGEventMaskForAllEvents;
-    if crate::keyboard_only() {
-        types = (1 << CGEventType::KeyDown as u64)
-            + (1 << CGEventType::KeyUp as u64)
-            + (1 << CGEventType::FlagsChanged as u64);
-    }
+    // Compute event mask based on keyboard_only setting
+    let event_mask: u64 = if crate::keyboard_only() {
+        (1 << CGEventType::KeyDown.0 as u64)
+            + (1 << CGEventType::KeyUp.0 as u64)
+            + (1 << CGEventType::FlagsChanged.0 as u64)
+    } else {
+        kCGEventMaskForAllEvents.into()
+    };
+
     unsafe {
         GLOBAL_CALLBACK = Some(Box::new(callback));
-        let _pool = NSAutoreleasePool::new(nil);
-        let tap = CGEventTapCreate(
-            CGEventTapLocation::HID, // HID, Session, AnnotatedSession,
-            kCGHeadInsertEventTap,
-            CGEventTapOption::ListenOnly,
-            types,
-            raw_callback,
-            nil,
-        );
-        if tap.is_null() {
-            return Err(ListenError::EventTapError);
-        }
-        let _loop = CFMachPortCreateRunLoopSource(nil, tap, 0);
-        if _loop.is_null() {
-            return Err(ListenError::LoopSourceError);
-        }
+        let _pool = NSAutoreleasePool::new();
+        let tap_callback: CGEventTapCallBack = Some(raw_callback);
+        let tap = CGEvent::tap_create(
+            CGEventTapLocation::HIDEventTap, // HID for listen-only
+            CGEventTapPlacement::HeadInsertEventTap,
+            CGEventTapOptions::ListenOnly,
+            event_mask,
+            tap_callback,
+            null_mut(),
+        )
+        .ok_or(ListenError::EventTapError)?;
 
-        let current_loop = CFRunLoopGetMain();
-        CFRunLoopAddSource(current_loop, _loop, kCFRunLoopCommonModes);
+        let loop_source = CFMachPort::new_run_loop_source(None, Some(&tap), 0)
+            .ok_or(ListenError::LoopSourceError)?;
 
-        CGEventTapEnable(tap, true);
-        CFRunLoopRun();
+        let main_loop = CFRunLoop::main().ok_or(ListenError::LoopSourceError)?;
+        main_loop.add_source(Some(&loop_source), kCFRunLoopCommonModes);
+
+        CGEvent::tap_enable(&tap, true);
+        CFRunLoop::run();
     }
     Ok(())
 }

@@ -1,7 +1,9 @@
 use crate::rdev::DisplayError;
-use core_graphics::display::CGDisplay;
+use objc2_core_graphics::CGMainDisplayID;
 
 pub fn display_size() -> Result<(u64, u64), DisplayError> {
-    let main = CGDisplay::main();
-    Ok((main.pixels_wide(), main.pixels_high()))
+    let display_id = CGMainDisplayID();
+    let width = objc2_core_graphics::CGDisplayPixelsWide(display_id);
+    let height = objc2_core_graphics::CGDisplayPixelsHigh(display_id);
+    Ok((width as u64, height as u64))
 }

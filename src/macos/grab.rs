@@ -1,40 +1,51 @@
 #![allow(improper_ctypes_definitions)]
 use crate::macos::common::*;
 use crate::rdev::{Event, GrabError};
-use cocoa::base::nil;
-use cocoa::foundation::NSAutoreleasePool;
-use core_graphics::event::{CGEventTapLocation, CGEventType};
+use objc2_core_foundation::{CFMachPort, CFRetained, CFRunLoop, kCFRunLoopCommonModes};
+use objc2_core_graphics::{
+    CGEvent, CGEventTapCallBack, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
+    CGEventTapProxy, CGEventType, kCGEventMaskForAllEvents,
+};
+use objc2_foundation::NSAutoreleasePool;
 use std::os::raw::c_void;
+use std::ptr::{null_mut, NonNull};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 static mut GLOBAL_CALLBACK: Option<Box<dyn FnMut(Event) -> Option<Event>>> = None;
+static IS_GRABBED: AtomicBool = AtomicBool::new(false);
+static mut CURRENT_LOOP: Option<CFRetained<CFRunLoop>> = None;
 
-unsafe extern "C" fn raw_callback(
+#[link(name = "Cocoa", kind = "framework")]
+unsafe extern "C" {}
+
+unsafe extern "C-unwind" fn raw_callback(
     _proxy: CGEventTapProxy,
     _type: CGEventType,
-    cg_event: CGEventRef,
+    cg_event: NonNull<CGEvent>,
     _user_info: *mut c_void,
-) -> CGEventRef {
-    // println!("Event ref {:?}", cg_event_ptr);
-    // let cg_event: CGEvent = transmute_copy::<*mut c_void, CGEvent>(&cg_event_ptr);
-    if let Ok(mut state) = KEYBOARD_STATE.lock()
-        && let Some(keyboard) = state.as_mut()
-            && let Some(event) = unsafe { convert(_type, &cg_event, keyboard) } {
-                let callback_ptr = &raw mut GLOBAL_CALLBACK;
-                if let Some(callback) = unsafe { (*callback_ptr).as_mut() }
-                    && callback(event).is_none() {
-                        cg_event.set_type(CGEventType::Null);
+) -> *mut CGEvent {
+    let opt = KEYBOARD_STATE.lock();
+    if let Ok(mut guard) = opt {
+        if let Some(keyboard) = guard.as_mut() {
+            unsafe {
+                if let Some(event) = convert(_type, cg_event, keyboard) {
+                    // Reborrowing the global callback pointer.
+                    let ptr = &raw mut GLOBAL_CALLBACK;
+                    if let Some(callback) = &mut *ptr {
+                        if callback(event).is_none() {
+                            CGEvent::set_type(Some(cg_event.as_ref()), CGEventType::Null)
+                        }
                     }
+                }
             }
-    cg_event
+        }
+    }
+    cg_event.as_ptr()
 }
-
-static mut CUR_LOOP: CFRunLoopSourceRef = std::ptr::null_mut();
 
 #[inline]
 pub fn is_grabbed() -> bool {
-    unsafe {
-        !CUR_LOOP.is_null()
-    }
+    IS_GRABBED.load(Ordering::SeqCst)
 }
 
 pub fn grab<T>(callback: T) -> Result<(), GrabError>
@@ -47,38 +58,39 @@ where
 
     unsafe {
         GLOBAL_CALLBACK = Some(Box::new(callback));
-        let _pool = NSAutoreleasePool::new(nil);
-        let tap = CGEventTapCreate(
-            CGEventTapLocation::Session, // HID, Session, AnnotatedSession,
-            kCGHeadInsertEventTap,
-            CGEventTapOption::Default,
-            kCGEventMaskForAllEvents,
-            raw_callback,
-            nil,
-        );
-        if tap.is_null() {
-            return Err(GrabError::EventTapError);
-        }
-        let _loop = CFMachPortCreateRunLoopSource(nil, tap, 0);
-        if _loop.is_null() {
-            return Err(GrabError::LoopSourceError);
-        }
+        let _pool = NSAutoreleasePool::new();
+        let tap_callback: CGEventTapCallBack = Some(raw_callback);
+        let tap = CGEvent::tap_create(
+            CGEventTapLocation::SessionEventTap, // Session for grab (can intercept)
+            CGEventTapPlacement::HeadInsertEventTap,
+            CGEventTapOptions::Default,
+            kCGEventMaskForAllEvents.into(),
+            tap_callback,
+            null_mut(),
+        )
+        .ok_or(GrabError::EventTapError)?;
 
-        CUR_LOOP = CFRunLoopGetCurrent() as _;
-        CFRunLoopAddSource(CUR_LOOP, _loop, kCFRunLoopCommonModes);
+        let loop_source = CFMachPort::new_run_loop_source(None, Some(&tap), 0)
+            .ok_or(GrabError::LoopSourceError)?;
 
-        CGEventTapEnable(tap, true);
-        CFRunLoopRun();
+        let current_loop = CFRunLoop::current().ok_or(GrabError::LoopSourceError)?;
+        current_loop.add_source(Some(&loop_source), kCFRunLoopCommonModes);
+        CURRENT_LOOP = Some(current_loop);
+
+        CGEvent::tap_enable(&tap, true);
+        IS_GRABBED.store(true, Ordering::SeqCst);
+        CFRunLoop::run();
     }
     Ok(())
 }
 
 pub fn exit_grab() -> Result<(), GrabError> {
     unsafe {
-        if !CUR_LOOP.is_null() {
-            CFRunLoopStop(CUR_LOOP);
-            CUR_LOOP = std::ptr::null_mut();
+        if let Some(ref current_loop) = CURRENT_LOOP {
+            current_loop.stop();
         }
+        CURRENT_LOOP = None;
+        IS_GRABBED.store(false, Ordering::SeqCst);
     }
     Ok(())
 }

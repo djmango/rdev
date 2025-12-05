@@ -6,7 +6,7 @@
 pub type CGKeyCode = u32;
 
 #[cfg(target_os = "macos")]
-pub type CGKeyCode = core_graphics::event::CGKeyCode;
+pub type CGKeyCode = objc2_core_graphics::CGKeyCode;
 
 pub const kVK_ANSI_A: CGKeyCode = 0;
 pub const kVK_ANSI_S: CGKeyCode = 1;

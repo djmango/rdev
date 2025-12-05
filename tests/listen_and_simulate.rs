@@ -56,12 +56,12 @@ fn test_listen_and_simulate() -> Result<(), Box<dyn Error>> {
         EventType::ButtonPress(Button::Right),
         EventType::ButtonRelease(Button::Right),
         EventType::Wheel {
-            delta_x: 0,
-            delta_y: 1,
+            delta_x: 0.0,
+            delta_y: 1.0,
         },
         EventType::Wheel {
-            delta_x: 0,
-            delta_y: -1,
+            delta_x: 0.0,
+            delta_y: -1.0,
         },
     ]
     .into_iter();

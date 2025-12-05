@@ -264,7 +264,7 @@ use crate::macos::{display_size as _display_size, listen as _listen, simulate as
 #[cfg(target_os = "macos")]
 pub use crate::macos::{set_is_main_thread, Keyboard, VirtualInput};
 #[cfg(target_os = "macos")]
-pub use core_graphics::{event::CGEventTapLocation, event_source::CGEventSourceStateID};
+pub use objc2_core_graphics::{CGEventTapLocation, CGEventSourceStateID};
 
 #[cfg(any(target_os = "android", target_os = "linux"))]
 pub use crate::keycodes::linux::{code_from_key, key_from_code};
