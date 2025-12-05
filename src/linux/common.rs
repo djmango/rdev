@@ -30,12 +30,12 @@ pub fn convert_event(code: c_uchar, type_: c_int, x: f64, y: f64) -> Option<Even
             2 => Some(EventType::ButtonPress(Button::Middle)),
             3 => Some(EventType::ButtonPress(Button::Right)),
             4 => Some(EventType::Wheel {
-                delta_y: 1,
-                delta_x: 0,
+                delta_y: 1.0,
+                delta_x: 0.0,
             }),
             5 => Some(EventType::Wheel {
-                delta_y: -1,
-                delta_x: 0,
+                delta_y: -1.0,
+                delta_x: 0.0,
             }),
             #[allow(clippy::useless_conversion)]
             code => Some(EventType::ButtonPress(Button::Unknown(code))),

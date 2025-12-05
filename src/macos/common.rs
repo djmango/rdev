@@ -215,7 +215,7 @@ pub unsafe fn convert(
                 cg_event.get_integer_value_field(EventField::SCROLL_WHEEL_EVENT_POINT_DELTA_AXIS_1);
             let delta_x =
                 cg_event.get_integer_value_field(EventField::SCROLL_WHEEL_EVENT_POINT_DELTA_AXIS_2);
-            Some(EventType::Wheel { delta_x, delta_y })
+            Some(EventType::Wheel { delta_x: delta_x as f64, delta_y: delta_y as f64 })
         }
         _ => None,
     };

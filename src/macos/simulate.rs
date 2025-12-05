@@ -9,7 +9,6 @@ use core_graphics::{
     event_source::{CGEventSource, CGEventSourceStateID},
     geometry::CGPoint,
 };
-use std::convert::TryInto;
 
 static mut MOUSE_EXTRA_INFO: i64 = 0;
 static mut KEYBOARD_EXTRA_INFO: i64 = 0;
@@ -142,8 +141,8 @@ unsafe fn convert_native_with_source(
                 source,
                 ScrollEventUnit::PIXEL,
                 wheel_count,
-                (*delta_y).try_into().ok()?,
-                (*delta_x).try_into().ok()?,
+                (*delta_y).round() as i32,
+                (*delta_x).round() as i32,
                 0,
             )
             .ok()

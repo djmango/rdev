@@ -317,12 +317,17 @@ pub enum EventType {
     },
     /// `delta_y` represents vertical scroll and `delta_x` represents horizontal scroll.
     /// Positive values correspond to scrolling up or right and negative values
-    /// correspond to scrolling down or left
+    /// correspond to scrolling down or left.
+    /// 
+    /// Values are expressed as fractions of a "line" (typically 1.0 = one line scroll).
+    /// On Windows, raw touchpad/high-resolution scroll values are preserved as fractions.
+    /// For example, a value of 0.25 means 1/4 of a line was scrolled.
+    /// 
     /// Note: Linux does not support horizontal scroll. When simulating scroll on Linux,
     /// only the sign of delta_y is considered, and not the magnitude to determine wheelup or wheeldown.
     Wheel {
-        delta_x: i64,
-        delta_y: i64,
+        delta_x: f64,
+        delta_y: f64,
     },
 }
 

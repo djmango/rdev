@@ -65,8 +65,8 @@
 //! send(&EventType::ButtonPress(Button::Left));
 //! send(&EventType::ButtonRelease(Button::Right));
 //! send(&EventType::Wheel {
-//!     delta_x: 0,
-//!     delta_y: 1,
+//!     delta_x: 0.0,
+//!     delta_y: 1.0,
 //! });
 //! ```
 //! # Main structs
@@ -128,9 +128,10 @@
 //!     },
 //!     /// Note: On Linux, there is no actual delta the actual values are ignored for delta_x
 //!     /// and we only look at the sign of delta_y to simulate wheelup or wheeldown.
+//!     /// Values are expressed as fractions of a "line" (1.0 = one line scroll).
 //!     Wheel {
-//!         delta_x: i64,
-//!         delta_y: i64,
+//!         delta_x: f64,
+//!         delta_y: f64,
 //!     },
 //! }
 //! ```
@@ -339,8 +340,8 @@ where
 ///     send(&EventType::ButtonPress(Button::Left));
 ///     send(&EventType::ButtonRelease(Button::Right));
 ///     send(&EventType::Wheel {
-///         delta_x: 0,
-///         delta_y: 1,
+///         delta_x: 0.0,
+///         delta_y: 1.0,
 ///     });
 /// }
 /// ```

@@ -156,19 +156,23 @@ pub fn simulate(event_type: &EventType) -> Result<(), SimulateError> {
             Button::Unknown(code) => sim_mouse_event(MOUSEEVENTF_XUP, 0, 0, (*code).into()),
         },
         EventType::Wheel { delta_x, delta_y } => {
-            if *delta_x != 0 {
+            if *delta_x != 0.0 {
+                // Convert fractional line units back to raw WHEEL_DELTA units
+                let raw_delta = (*delta_x * (WHEEL_DELTA as f64)).round() as i32;
                 sim_mouse_event(
                     MOUSEEVENTF_HWHEEL,
-                    (c_short::try_from(*delta_x).map_err(|_| SimulateError)? * WHEEL_DELTA) as u32,
+                    raw_delta as u32,
                     0,
                     0,
                 )?;
             }
 
-            if *delta_y != 0 {
+            if *delta_y != 0.0 {
+                // Convert fractional line units back to raw WHEEL_DELTA units
+                let raw_delta = (*delta_y * (WHEEL_DELTA as f64)).round() as i32;
                 sim_mouse_event(
                     MOUSEEVENTF_WHEEL,
-                    (c_short::try_from(*delta_y).map_err(|_| SimulateError)? * WHEEL_DELTA) as u32,
+                    raw_delta as u32,
                     0,
                     0,
                 )?;
