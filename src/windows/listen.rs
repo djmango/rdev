@@ -20,9 +20,10 @@ use winapi::{
         winuser::{
             CallNextHookEx, CreateWindowExA, DefWindowProcA, DispatchMessageA, GetMessageA,
             GetRawInputData, RegisterClassExA, RegisterRawInputDevices, TranslateMessage,
-            CS_HREDRAW, CS_VREDRAW, HC_ACTION, HRAWINPUT, HWND_MESSAGE, MSG, PKBDLLHOOKSTRUCT,
+            CS_HREDRAW, CS_VREDRAW, HC_ACTION, HRAWINPUT, MSG, PKBDLLHOOKSTRUCT,
             PMOUSEHOOKSTRUCT, RAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER, RIDEV_INPUTSINK,
             RID_INPUT, RIM_TYPEMOUSE, RI_MOUSE_WHEEL, WM_INPUT, WNDCLASSEXA,
+            WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
         },
     },
 };
@@ -173,8 +174,10 @@ unsafe fn handle_raw_input(lparam: LPARAM) {
     }
 }
 
-/// Create a hidden message-only window for receiving Raw Input
-unsafe fn create_message_window() -> Option<HWND> {
+/// Create a hidden window for receiving Raw Input
+/// Uses a real invisible window (not HWND_MESSAGE) because message-only windows
+/// may not properly receive WM_INPUT messages on all Windows versions.
+unsafe fn create_hidden_window() -> Option<HWND> {
     let class_name = b"RdevRawInputClass\0";
     let hinstance = GetModuleHandleA(null_mut());
 
@@ -189,16 +192,20 @@ unsafe fn create_message_window() -> Option<HWND> {
         // Class might already be registered, continue anyway
     }
 
+    // Create a real invisible window instead of HWND_MESSAGE
+    // WS_EX_TOOLWINDOW: Won't appear in taskbar
+    // WS_EX_NOACTIVATE: Won't steal focus
+    // WS_POPUP: No window decorations
     let hwnd = CreateWindowExA(
-        0,
+        WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
         class_name.as_ptr() as *const i8,
         b"RdevRawInput\0".as_ptr() as *const i8,
+        WS_POPUP,
         0,
         0,
-        0,
-        0,
-        0,
-        HWND_MESSAGE, // Message-only window - completely invisible
+        1,
+        1,
+        null_mut(), // No parent - this is a real top-level window
         null_mut(),
         hinstance,
         null_mut(),
@@ -238,12 +245,14 @@ where
             // Create hidden window and register for Raw Input to capture all scroll events
             // Raw Input handles wheel events from ALL devices (traditional mice, gaming mice,
             // precision touchpads) - the hook skips wheel events to avoid duplicates
-            if let Some(hwnd) = create_message_window() {
-                if !register_raw_input(hwnd) {
+            if let Some(hwnd) = create_hidden_window() {
+                if register_raw_input(hwnd) {
+                    log::debug!("Raw Input registered successfully for scroll events");
+                } else {
                     log::warn!("Failed to register for Raw Input - scroll events may not work");
                 }
             } else {
-                log::warn!("Failed to create message window for Raw Input");
+                log::warn!("Failed to create hidden window for Raw Input");
             }
         }
 
