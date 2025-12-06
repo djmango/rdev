@@ -22,10 +22,13 @@ use winapi::{
             GetRawInputData, RegisterClassExA, RegisterRawInputDevices, TranslateMessage,
             CS_HREDRAW, CS_VREDRAW, HC_ACTION, HRAWINPUT, HWND_MESSAGE, MSG, PKBDLLHOOKSTRUCT,
             PMOUSEHOOKSTRUCT, RAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER, RIDEV_INPUTSINK,
-            RID_INPUT, RIM_TYPEMOUSE, RI_MOUSE_HWHEEL, RI_MOUSE_WHEEL, WM_INPUT, WNDCLASSEXA,
+            RID_INPUT, RIM_TYPEMOUSE, RI_MOUSE_WHEEL, WM_INPUT, WNDCLASSEXA,
         },
     },
 };
+
+// RI_MOUSE_HWHEEL is not defined in winapi 0.3.9, define it manually
+const RI_MOUSE_HWHEEL: u16 = 0x0800;
 
 static mut GLOBAL_CALLBACK: Option<Box<dyn FnMut(Event)>> = None;
 
@@ -62,7 +65,8 @@ unsafe fn raw_callback(
                 usb_hid: 0,
                 extra_data: f_get_extra_data(lpdata),
             };
-            if let Some(callback) = &mut GLOBAL_CALLBACK {
+            let ptr = &raw mut GLOBAL_CALLBACK;
+            if let Some(callback) = &mut *ptr {
                 callback(event);
             }
         }
@@ -141,11 +145,11 @@ unsafe fn handle_raw_input(lparam: LPARAM) {
     let button_flags = mouse.usButtonFlags as u32;
 
     // Check for wheel events
-    let (delta_x, delta_y) = if button_flags & RI_MOUSE_WHEEL != 0 {
+    let (delta_x, delta_y) = if button_flags & (RI_MOUSE_WHEEL as u32) != 0 {
         // Vertical scroll
         let delta = mouse.usButtonData as i16;
         (0.0, delta as f64 / WHEEL_DELTA as f64)
-    } else if button_flags & RI_MOUSE_HWHEEL != 0 {
+    } else if button_flags & (RI_MOUSE_HWHEEL as u32) != 0 {
         // Horizontal scroll
         let delta = mouse.usButtonData as i16;
         (delta as f64 / WHEEL_DELTA as f64, 0.0)
@@ -163,7 +167,8 @@ unsafe fn handle_raw_input(lparam: LPARAM) {
         extra_data: 0,
     };
 
-    if let Some(callback) = &mut GLOBAL_CALLBACK {
+    let ptr = &raw mut GLOBAL_CALLBACK;
+    if let Some(callback) = &mut *ptr {
         callback(event);
     }
 }
