@@ -130,7 +130,7 @@ impl Keyboard {
         }
     }
 
-    pub(crate) unsafe fn get_current_modifiers(&mut self) -> Option<u32> {
+    pub(crate) unsafe fn get_current_modifiers(&mut self) -> Option<u32> { unsafe {
         let MyDisplay(display) = *self.display;
         let screen_number = xlib::XDefaultScreen(display);
         let screen = xlib::XScreenOfDisplay(display, screen_number);
@@ -156,13 +156,13 @@ impl Keyboard {
             &mut mask_return,
         );
         Some(mask_return)
-    }
+    }}
 
     pub(crate) unsafe fn unicode_from_code(
         &mut self,
         keycode: c_uint,
         state: c_uint,
-    ) -> Option<UnicodeInfo> {
+    ) -> Option<UnicodeInfo> { unsafe {
         let MyDisplay(display) = *self.display;
         let MyXIC(xic) = *self.xic;
         if display.is_null() || xic.is_null() {
@@ -227,15 +227,11 @@ impl Keyboard {
 
         // C0 controls
         if len == 1 {
-            match String::from_utf8(buf[..len].to_vec()) {
-                Ok(s) => {
-                    if let Some(c) = s.chars().next() {
-                        if ('\u{1}'..='\u{1f}').contains(&c) {
-                            return None;
-                        }
+            if let Ok(s) = String::from_utf8(buf[..len].to_vec()) {
+                if let Some(c) = s.chars().next()
+                    && ('\u{1}'..='\u{1f}').contains(&c) {
+                        return None;
                     }
-                }
-                Err(_) => {}
             }
         }
 
@@ -244,7 +240,7 @@ impl Keyboard {
             unicode: Vec::new(),
             is_dead: false,
         })
-    }
+    }}
 
     pub fn is_dead(&mut self) -> bool {
         let ptr = unsafe { XKeysymToString(*self.keysym) };

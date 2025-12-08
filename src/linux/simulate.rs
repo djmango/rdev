@@ -7,7 +7,7 @@ use std::ptr::null;
 use x11::xlib;
 use x11::xtest;
 
-unsafe fn send_native(event_type: &EventType, display: *mut xlib::Display) -> Option<()> {
+unsafe fn send_native(event_type: &EventType, display: *mut xlib::Display) -> Option<()> { unsafe {
     let res = match event_type {
         EventType::KeyPress(key) => match key {
             crate::Key::RawKey(rawkey) => {
@@ -88,7 +88,7 @@ unsafe fn send_native(event_type: &EventType, display: *mut xlib::Display) -> Op
     } else {
         Some(())
     }
-}
+}}
 
 pub fn simulate(event_type: &EventType) -> Result<(), SimulateError> {
     unsafe {
@@ -111,7 +111,7 @@ pub fn simulate(event_type: &EventType) -> Result<(), SimulateError> {
     }
 }
 
-unsafe fn send_native_char(chr: char, pressed: bool, display: *mut xlib::Display) -> Option<()> {
+unsafe fn send_native_char(chr: char, pressed: bool, display: *mut xlib::Display) -> Option<()> { unsafe {
     // unuse keycode: F24 -> 194
     let keycode: u32 = 194;
 
@@ -137,7 +137,7 @@ unsafe fn send_native_char(chr: char, pressed: bool, display: *mut xlib::Display
     } else {
         Some(())
     }
-}
+}}
 
 pub fn simulate_char(chr: char, pressed: bool) -> Result<(), SimulateError> {
     unsafe {

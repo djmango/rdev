@@ -113,8 +113,8 @@ impl Drop for KeyboardGrabber {
 
 #[inline]
 fn is_control(unicode_info: &Option<UnicodeInfo>) -> bool {
-    unicode_info.as_ref().map_or(false, |unicode_info| {
-        unicode_info.name.as_ref().map_or(false, |seq| {
+    unicode_info.as_ref().is_some_and(|unicode_info| {
+        unicode_info.name.as_ref().is_some_and(|seq| {
             for chr in seq.chars() {
                 if chr.is_control() {
                     return true;
@@ -134,7 +134,7 @@ fn convert_event(code: u32, is_press: bool) -> Event {
     };
 
     let (unicode, platform_code) = unsafe {
-        if let Some(kbd) = &mut KEYBOARD {
+        if let Some(kbd) = &mut *(&raw mut KEYBOARD) {
             // delete -> \u{7f}
             let unicode_info = kbd.add(&event_type);
             if is_control(&unicode_info) {
@@ -195,7 +195,7 @@ fn start_callback_event_thread(recv: Receiver<GrabEvent>) {
         if let Ok(data) = recv.recv() {
             match data {
                 GrabEvent::KeyEvent(event) => unsafe {
-                    if let Some(callback) = &mut GLOBAL_CALLBACK {
+                    if let Some(callback) = &mut *(&raw mut GLOBAL_CALLBACK) {
                         callback(event);
                     }
                 },
@@ -215,7 +215,7 @@ fn start_grab_service() -> Result<(), GrabError> {
         // to-do: is display pointer in keyboard always valid?
         // KEYBOARD usage is very confusing and error prone.
         KEYBOARD = Keyboard::new();
-        if KEYBOARD.is_none() {
+        if (*&raw const KEYBOARD).is_none() {
             return Err(GrabError::KeyboardError);
         }
     }
@@ -285,13 +285,10 @@ fn loop_poll_x_event(display: Arc<Mutex<u64>>, mut poll: Poll) {
         match poll.poll(&mut events, Some(Duration::from_millis(300))) {
             Ok(_) => {
                 for event in &events {
-                    match event.token() {
-                        GRAB_RECV => {
-                            let lock = display.lock().unwrap();
-                            let display = *lock as *mut xlib::Display;
-                            read_x_event(&mut x_event, display);
-                        }
-                        _ => {}
+                    if event.token() == GRAB_RECV {
+                        let lock = display.lock().unwrap();
+                        let display = *lock as *mut xlib::Display;
+                        read_x_event(&mut x_event, display);
                     }
                 }
             }
