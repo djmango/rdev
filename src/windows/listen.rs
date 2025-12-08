@@ -35,7 +35,7 @@ use winapi::{
 // HID Parser types and functions (from hid.dll)
 // These aren't exposed in winapi 0.3.x, so we define them manually
 
-type PHIDP_PREPARSED_DATA = *mut std::ffi::c_void;
+type PhidpPreparsedData = *mut std::ffi::c_void;
 
 #[repr(C)]
 #[allow(non_snake_case)]
@@ -67,7 +67,7 @@ const HIDP_STATUS_SUCCESS: NTSTATUS = 0x0011_0000u32 as i32;
 #[link(name = "hid")]
 unsafe extern "system" {
     fn HidP_GetCaps(
-        PreparsedData: PHIDP_PREPARSED_DATA,
+        PreparsedData: PhidpPreparsedData,
         Capabilities: *mut HIDP_CAPS,
     ) -> NTSTATUS;
 
@@ -77,7 +77,7 @@ unsafe extern "system" {
         LinkCollection: USHORT,
         Usage: USHORT,
         UsageValue: *mut ULONG,
-        PreparsedData: PHIDP_PREPARSED_DATA,
+        PreparsedData: PhidpPreparsedData,
         Report: *const i8,
         ReportLength: ULONG,
     ) -> NTSTATUS;
@@ -101,7 +101,6 @@ const HID_USAGE_DIGITIZER_TOUCH_PAD: u16 = 0x05;
 
 // HID Usages for touchpad data extraction
 const HID_USAGE_DIGITIZER_CONTACT_COUNT: u16 = 0x54;
-const HID_USAGE_DIGITIZER_CONTACT_ID: u16 = 0x51;
 const HID_USAGE_GENERIC_X: u16 = 0x30;
 const HID_USAGE_GENERIC_Y: u16 = 0x31;
 
@@ -130,7 +129,7 @@ unsafe fn raw_callback(
     param: WPARAM,
     lpdata: LPARAM,
     f_get_extra_data: impl FnOnce(isize) -> ULONG_PTR,
-) -> LRESULT {
+) -> LRESULT { unsafe {
     if code == HC_ACTION {
         let (opt, code) = convert(param, lpdata);
         if let Some(event_type) = opt {
@@ -153,19 +152,19 @@ unsafe fn raw_callback(
         }
     }
     CallNextHookEx(null_mut(), code, param, lpdata)
-}
+}}
 
-unsafe extern "system" fn raw_callback_mouse(code: i32, param: usize, lpdata: isize) -> isize {
-    raw_callback(code, param, lpdata, |data: isize| unsafe {
+unsafe extern "system" fn raw_callback_mouse(code: i32, param: usize, lpdata: isize) -> isize { unsafe {
+    raw_callback(code, param, lpdata, |data: isize| {
         (*(data as PMOUSEHOOKSTRUCT)).dwExtraInfo
     })
-}
+}}
 
-unsafe extern "system" fn raw_callback_keyboard(code: i32, param: usize, lpdata: isize) -> isize {
-    raw_callback(code, param, lpdata, |data: isize| unsafe {
+unsafe extern "system" fn raw_callback_keyboard(code: i32, param: usize, lpdata: isize) -> isize { unsafe {
+    raw_callback(code, param, lpdata, |data: isize| {
         (*(data as PKBDLLHOOKSTRUCT)).dwExtraInfo
     })
-}
+}}
 
 /// Window procedure for the hidden message window
 unsafe extern "system" fn window_proc(
@@ -173,16 +172,16 @@ unsafe extern "system" fn window_proc(
     msg: UINT,
     wparam: WPARAM,
     lparam: LPARAM,
-) -> LRESULT {
+) -> LRESULT { unsafe {
     if msg == WM_INPUT {
         handle_raw_input(lparam);
         return 0;
     }
     DefWindowProcA(hwnd, msg, wparam, lparam)
-}
+}}
 
 /// Handle WM_INPUT messages to capture scroll events from all mice and touchpads
-unsafe fn handle_raw_input(lparam: LPARAM) {
+unsafe fn handle_raw_input(lparam: LPARAM) { unsafe {
     let mut size: UINT = 0;
 
     // Get required buffer size
@@ -223,14 +222,14 @@ unsafe fn handle_raw_input(lparam: LPARAM) {
         RIM_TYPEHID => handle_raw_hid_input(raw, &buffer),
         _ => {}
     }
-}
+}}
 
 /// Handle raw mouse input (traditional mice, some touchpads in mouse mode)
 /// Emits raw events that are not breakable by any user-mode application
 /// Note: Kernel drivers (anti-cheat, EDR) can still intercept or block these events.
-unsafe fn handle_raw_mouse_input(raw: &RAWINPUT) {
+unsafe fn handle_raw_mouse_input(raw: &RAWINPUT) { unsafe {
     let mouse = &raw.data.mouse();
-    let button_flags = mouse.usButtonFlags as u16;
+    let button_flags = mouse.usButtonFlags;
 
     if button_flags & RI_MOUSE_LEFT_BUTTON_DOWN != 0 {
         emit_raw_event(EventType::ButtonPressRaw(Button::Left));
@@ -273,11 +272,11 @@ unsafe fn handle_raw_mouse_input(raw: &RAWINPUT) {
             delta_y: 0.0,
         });
     }
-}
+}}
 
 /// Handle raw keyboard input
 /// Emits KeyPressRaw/KeyReleaseRaw that cannot be blocked by any user-mode application
-unsafe fn handle_raw_keyboard_input(raw: &RAWINPUT) {
+unsafe fn handle_raw_keyboard_input(raw: &RAWINPUT) { unsafe {
     let keyboard = &raw.data.keyboard();
     let vkey = keyboard.VKey;
     let flags = keyboard.Flags;
@@ -293,10 +292,10 @@ unsafe fn handle_raw_keyboard_input(raw: &RAWINPUT) {
     } else {
         emit_raw_event(EventType::KeyPressRaw(key));
     }
-}
+}}
 
 /// Get or cache preparsed data for a HID device
-unsafe fn get_preparsed_data(device_handle: usize) -> Option<PHIDP_PREPARSED_DATA> {
+unsafe fn get_preparsed_data(device_handle: usize) -> Option<PhidpPreparsedData> { unsafe {
     // Initialize cache if needed using raw pointer
     let cache_ptr = &raw mut PREPARSED_DATA_CACHE;
     if (*cache_ptr).is_none() {
@@ -307,7 +306,7 @@ unsafe fn get_preparsed_data(device_handle: usize) -> Option<PHIDP_PREPARSED_DAT
 
     // Check if already cached
     if let Some(data) = cache.get(&device_handle) {
-        return Some(data.as_ptr() as PHIDP_PREPARSED_DATA);
+        return Some(data.as_ptr() as PhidpPreparsedData);
     }
 
     // Get preparsed data size
@@ -338,15 +337,15 @@ unsafe fn get_preparsed_data(device_handle: usize) -> Option<PHIDP_PREPARSED_DAT
         return None;
     }
 
-    let ptr = preparsed_data.as_ptr() as PHIDP_PREPARSED_DATA;
+    let ptr = preparsed_data.as_ptr() as PhidpPreparsedData;
     cache.insert(device_handle, preparsed_data);
 
     Some(ptr)
-}
+}}
 
 /// Handle raw HID input (precision touchpads)
 /// Uses HidP_* functions to properly parse touchpad reports
-unsafe fn handle_raw_hid_input(raw: &RAWINPUT, buffer: &[u8]) {
+unsafe fn handle_raw_hid_input(raw: &RAWINPUT, buffer: &[u8]) { unsafe {
     let hid = &raw.data.hid();
 
     if hid.dwCount == 0 || hid.dwSizeHid == 0 {
@@ -382,21 +381,20 @@ unsafe fn handle_raw_hid_input(raw: &RAWINPUT, buffer: &[u8]) {
         let report = &buffer[report_offset..report_offset + hid.dwSizeHid as usize];
 
         // Try to extract touchpad scroll data using HidP functions
-        if let Some((delta_x, delta_y)) = parse_touchpad_with_hidp(preparsed_data, report, &caps) {
-            if delta_x != 0.0 || delta_y != 0.0 {
+        if let Some((delta_x, delta_y)) = parse_touchpad_with_hidp(preparsed_data, report, &caps)
+            && (delta_x != 0.0 || delta_y != 0.0) {
                 emit_raw_event(EventType::WheelRaw { delta_x, delta_y });
             }
-        }
     }
-}
+}}
 
 /// Parse touchpad data using HidP_* functions
 /// Returns scroll deltas if this is a two-finger scroll gesture
 unsafe fn parse_touchpad_with_hidp(
-    preparsed_data: PHIDP_PREPARSED_DATA,
+    preparsed_data: PhidpPreparsedData,
     report: &[u8],
     _caps: &HIDP_CAPS,
-) -> Option<(f64, f64)> {
+) -> Option<(f64, f64)> { unsafe {
     // Get contact count from the digitizer page
     let mut contact_count: ULONG = 0;
     let status = HidP_GetUsageValue(
@@ -493,10 +491,10 @@ unsafe fn parse_touchpad_with_hidp(
     }
 
     None
-}
+}}
 
 /// Emit a raw event to the callback
-unsafe fn emit_raw_event(event_type: EventType) {
+unsafe fn emit_raw_event(event_type: EventType) { unsafe {
     let event = Event {
         event_type,
         time: SystemTime::now(),
@@ -511,12 +509,12 @@ unsafe fn emit_raw_event(event_type: EventType) {
     if let Some(callback) = &mut *ptr {
         callback(event);
     }
-}
+}}
 
 /// Create a hidden window for receiving Raw Input
 /// Uses a real invisible window (not HWND_MESSAGE) because message-only windows
 /// may not properly receive WM_INPUT messages on all Windows versions.
-unsafe fn create_hidden_window() -> Option<HWND> {
+unsafe fn create_hidden_window() -> Option<HWND> { unsafe {
     let class_name = b"RdevRawInputClass\0";
     let hinstance = GetModuleHandleA(null_mut());
 
@@ -538,7 +536,7 @@ unsafe fn create_hidden_window() -> Option<HWND> {
     let hwnd = CreateWindowExA(
         WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
         class_name.as_ptr() as *const i8,
-        b"RdevRawInput\0".as_ptr() as *const i8,
+        c"RdevRawInput".as_ptr(),
         WS_POPUP,
         0,
         0,
@@ -555,10 +553,10 @@ unsafe fn create_hidden_window() -> Option<HWND> {
     }
 
     Some(hwnd)
-}
+}}
 
 /// Register for Raw Input from both mice and precision touchpads
-unsafe fn register_raw_input(hwnd: HWND) -> bool {
+unsafe fn register_raw_input(hwnd: HWND) -> bool { unsafe {
     let devices = [
         // Traditional mouse input
         RAWINPUTDEVICE {
@@ -584,7 +582,7 @@ unsafe fn register_raw_input(hwnd: HWND) -> bool {
     ];
 
     RegisterRawInputDevices(devices.as_ptr(), devices.len() as UINT, size_of::<RAWINPUTDEVICE>() as UINT) != 0
-}
+}}
 
 pub fn listen<T>(callback: T) -> Result<(), ListenError>
 where

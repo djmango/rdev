@@ -39,7 +39,7 @@ pub fn get_modifier(key: Key) -> bool {
     KEYBOARD.lock().unwrap().get_modifier(key)
 }
 
-pub unsafe fn get_code(lpdata: LPARAM) -> DWORD {
+pub unsafe fn get_code(lpdata: LPARAM) -> DWORD { unsafe {
     let kb = *(lpdata as *const KBDLLHOOKSTRUCT);
     // https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes#:~:text=OEM%20specific-,VK_PACKET,-0xE7
     if kb.vkCode == VK_PACKET as u32 {
@@ -47,9 +47,9 @@ pub unsafe fn get_code(lpdata: LPARAM) -> DWORD {
     } else {
         kb.vkCode
     }
-}
+}}
 
-pub unsafe fn get_scan_code(lpdata: LPARAM) -> DWORD {
+pub unsafe fn get_scan_code(lpdata: LPARAM) -> DWORD { unsafe {
     let kb = *(lpdata as *const KBDLLHOOKSTRUCT);
     // https://learn.microsoft.com/en-us/windows/win32/inputdev/about-keyboard-input#:~:text=The%20right%2Dhand%20SHIFT%20key%20is%20not%20considered%20an%20extended%2Dkey%2C%20it%20has%20a%20separate%20scan%20code%20instead.
     // The right-hand SHIFT key is not considered an extended-key, it has a separate scan code instead.
@@ -63,24 +63,24 @@ pub unsafe fn get_scan_code(lpdata: LPARAM) -> DWORD {
             }
         }
     }
-}
-pub unsafe fn get_point(lpdata: LPARAM) -> (LONG, LONG) {
+}}
+pub unsafe fn get_point(lpdata: LPARAM) -> (LONG, LONG) { unsafe {
     let mouse = *(lpdata as *const MSLLHOOKSTRUCT);
     (mouse.pt.x, mouse.pt.y)
-}
+}}
 // https://docs.microsoft.com/en-us/previous-versions/windows/desktop/legacy/ms644986(v=vs.85)
 /// confusingly, this function returns a WORD (unsigned), but may be
 /// interpreted as either signed or unsigned depending on context
-pub unsafe fn get_delta(lpdata: LPARAM) -> WORD {
+pub unsafe fn get_delta(lpdata: LPARAM) -> WORD { unsafe {
     let mouse = *(lpdata as *const MSLLHOOKSTRUCT);
     HIWORD(mouse.mouseData)
-}
-pub unsafe fn get_button_code(lpdata: LPARAM) -> WORD {
+}}
+pub unsafe fn get_button_code(lpdata: LPARAM) -> WORD { unsafe {
     let mouse = *(lpdata as *const MSLLHOOKSTRUCT);
     HIWORD(mouse.mouseData)
-}
+}}
 
-pub unsafe fn convert(param: WPARAM, lpdata: LPARAM) -> (Option<EventType>, u16) {
+pub unsafe fn convert(param: WPARAM, lpdata: LPARAM) -> (Option<EventType>, u16) { unsafe {
     let mut code = 0;
     (
         match param.try_into() {
@@ -133,7 +133,7 @@ pub unsafe fn convert(param: WPARAM, lpdata: LPARAM) -> (Option<EventType>, u16)
         },
         code,
     )
-}
+}}
 
 pub fn vk_to_scancode(vk: u32) -> u32 {
     unsafe {
@@ -149,7 +149,7 @@ pub enum HookError {
     Key(DWORD),
 }
 
-pub unsafe fn set_key_hook(callback: RawCallback) -> Result<(), HookError> {
+pub unsafe fn set_key_hook(callback: RawCallback) -> Result<(), HookError> { unsafe {
     let hook = SetWindowsHookExA(WH_KEYBOARD_LL, Some(callback), null_mut(), 0);
 
     if hook.is_null() {
@@ -158,9 +158,9 @@ pub unsafe fn set_key_hook(callback: RawCallback) -> Result<(), HookError> {
     }
     KEYBOARD_HOOK = hook;
     Ok(())
-}
+}}
 
-pub unsafe fn set_mouse_hook(callback: RawCallback) -> Result<(), HookError> {
+pub unsafe fn set_mouse_hook(callback: RawCallback) -> Result<(), HookError> { unsafe {
     let hook = SetWindowsHookExA(WH_MOUSE_LL, Some(callback), null_mut(), 0);
     if hook.is_null() {
         let error = GetLastError();
@@ -168,4 +168,4 @@ pub unsafe fn set_mouse_hook(callback: RawCallback) -> Result<(), HookError> {
     }
     MOUSE_HOOK = hook;
     Ok(())
-}
+}}

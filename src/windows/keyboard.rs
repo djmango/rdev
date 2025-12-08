@@ -28,6 +28,12 @@ pub struct Keyboard {
     event_popup: bool,
 }
 
+impl Default for Keyboard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Keyboard {
     pub fn new() -> Keyboard {
         Keyboard {
@@ -102,7 +108,7 @@ impl Keyboard {
         self.event_popup = b;
     }
 
-    pub(crate) unsafe fn get_unicode(&mut self, lpdata: LPARAM) -> Option<UnicodeInfo> {
+    pub(crate) unsafe fn get_unicode(&mut self, lpdata: LPARAM) -> Option<UnicodeInfo> { unsafe {
         // https://gist.github.com/akimsko/2011327
         // https://www.experts-exchange.com/questions/23453780/LowLevel-Keystroke-Hook-removes-Accents-on-French-Keyboard.html
         let code = get_code(lpdata);
@@ -110,9 +116,9 @@ impl Keyboard {
 
         self.set_global_state()?;
         self.get_code_name_unicode(code, scan_code)
-    }
+    }}
 
-    pub(crate) unsafe fn set_global_state(&mut self) -> Option<()> {
+    pub(crate) unsafe fn set_global_state(&mut self) -> Option<()> { unsafe {
         let mut state = [0_u8; 256];
         let state_ptr = state.as_mut_ptr();
 
@@ -200,13 +206,13 @@ impl Keyboard {
 
         self.last_state = state;
         Some(())
-    }
+    }}
 
     pub(crate) unsafe fn get_code_name_unicode(
         &mut self,
         code: UINT,
         scan_code: UINT,
-    ) -> Option<UnicodeInfo> {
+    ) -> Option<UnicodeInfo> { unsafe {
         let current_window_thread_id = GetWindowThreadProcessId(GetForegroundWindow(), null_mut());
         let state_ptr = self.last_state.as_mut_ptr();
         const BUF_LEN: i32 = 32;
@@ -299,9 +305,9 @@ impl Keyboard {
             return None;
         }
         result
-    }
+    }}
 
-    unsafe fn clear_keyboard_buffer(&self, code: UINT, scan_code: UINT, layout: HKL) {
+    unsafe fn clear_keyboard_buffer(&self, code: UINT, scan_code: UINT, layout: HKL) { unsafe {
         const BUF_LEN: i32 = 32;
         let mut buff = [0_u16; BUF_LEN as usize];
         let buff_ptr = buff.as_mut_ptr();
@@ -312,7 +318,7 @@ impl Keyboard {
         while len < 0 {
             len = ToUnicodeEx(code, scan_code, state_ptr, buff_ptr, BUF_LEN, 0, layout);
         }
-    }
+    }}
 
     pub fn is_dead(&mut self) -> bool {
         self.last_is_dead
