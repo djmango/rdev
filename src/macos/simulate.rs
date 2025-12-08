@@ -198,9 +198,9 @@ pub struct VirtualInput {
 }
 
 impl VirtualInput {
-    pub fn new(state_id: CGEventSourceStateID, tap_loc: CGEventTapLocation) -> Result<Self, ()> {
-        let source = CGEventSource::new(state_id).ok_or(())?;
-        Ok(Self { source, tap_loc })
+    pub fn new(state_id: CGEventSourceStateID, tap_loc: CGEventTapLocation) -> Option<Self> {
+        let source = CGEventSource::new(state_id)?;
+        Some(Self { source, tap_loc })
     }
 
     pub fn simulate(&self, event_type: &EventType) -> Result<(), SimulateError> {
