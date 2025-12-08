@@ -150,6 +150,14 @@ unsafe fn convert_native_with_source(
                     0,
                 )
             }
+            // Raw events are capture-only, they cannot be simulated
+            // Use the non-raw variants (ButtonPress, MouseMove, Wheel, KeyPress) for simulation
+            EventType::MouseMoveRaw { .. }
+            | EventType::ButtonPressRaw(_)
+            | EventType::ButtonReleaseRaw(_)
+            | EventType::WheelRaw { .. }
+            | EventType::KeyPressRaw(_)
+            | EventType::KeyReleaseRaw(_) => None,
         }
     }
 }

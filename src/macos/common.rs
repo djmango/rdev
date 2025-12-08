@@ -82,62 +82,295 @@ unsafe fn get_code(cg_event: &CGEvent) -> Option<CGKeyCode> {
         .ok()
 }
 
+/// Convert a CGEvent to rdev Events
+/// Returns a Vec because we emit both raw events and absolute events
 pub unsafe fn convert(
     _type: CGEventType,
     cg_event: NonNull<CGEvent>,
     keyboard_state: &mut Keyboard,
-) -> Option<Event> {
+) -> Vec<Event> {
     unsafe {
         let cg_event_ref = cg_event.as_ref();
-        let mut code: CGKeyCode = 0;
-        let option_type = match _type {
-            CGEventType::LeftMouseDown => Some(EventType::ButtonPress(Button::Left)),
-            CGEventType::LeftMouseUp => Some(EventType::ButtonRelease(Button::Left)),
-            CGEventType::RightMouseDown => Some(EventType::ButtonPress(Button::Right)),
-            CGEventType::RightMouseUp => Some(EventType::ButtonRelease(Button::Right)),
+        let mut events = Vec::new();
+
+        // Get common event data
+        let extra_data = CGEvent::integer_value_field(
+            Some(cg_event_ref),
+            CGEventField::EventSourceUserData,
+        );
+        let time = SystemTime::now();
+
+        match _type {
+            CGEventType::LeftMouseDown => {
+                // Raw event
+                events.push(Event {
+                    event_type: EventType::ButtonPressRaw(Button::Left),
+                    time,
+                    unicode: None,
+                    platform_code: 0,
+                    position_code: 0,
+                    usb_hid: 0,
+                    extra_data,
+                });
+                // Absolute event
+                events.push(Event {
+                    event_type: EventType::ButtonPress(Button::Left),
+                    time,
+                    unicode: None,
+                    platform_code: 0,
+                    position_code: 0,
+                    usb_hid: 0,
+                    extra_data,
+                });
+            }
+            CGEventType::LeftMouseUp => {
+                events.push(Event {
+                    event_type: EventType::ButtonReleaseRaw(Button::Left),
+                    time,
+                    unicode: None,
+                    platform_code: 0,
+                    position_code: 0,
+                    usb_hid: 0,
+                    extra_data,
+                });
+                events.push(Event {
+                    event_type: EventType::ButtonRelease(Button::Left),
+                    time,
+                    unicode: None,
+                    platform_code: 0,
+                    position_code: 0,
+                    usb_hid: 0,
+                    extra_data,
+                });
+            }
+            CGEventType::RightMouseDown => {
+                events.push(Event {
+                    event_type: EventType::ButtonPressRaw(Button::Right),
+                    time,
+                    unicode: None,
+                    platform_code: 0,
+                    position_code: 0,
+                    usb_hid: 0,
+                    extra_data,
+                });
+                events.push(Event {
+                    event_type: EventType::ButtonPress(Button::Right),
+                    time,
+                    unicode: None,
+                    platform_code: 0,
+                    position_code: 0,
+                    usb_hid: 0,
+                    extra_data,
+                });
+            }
+            CGEventType::RightMouseUp => {
+                events.push(Event {
+                    event_type: EventType::ButtonReleaseRaw(Button::Right),
+                    time,
+                    unicode: None,
+                    platform_code: 0,
+                    position_code: 0,
+                    usb_hid: 0,
+                    extra_data,
+                });
+                events.push(Event {
+                    event_type: EventType::ButtonRelease(Button::Right),
+                    time,
+                    unicode: None,
+                    platform_code: 0,
+                    position_code: 0,
+                    usb_hid: 0,
+                    extra_data,
+                });
+            }
             CGEventType::OtherMouseDown => {
-                match CGEvent::integer_value_field(
+                let button_num = CGEvent::integer_value_field(
                     Some(cg_event_ref),
                     CGEventField::MouseEventButtonNumber,
-                ) {
-                    2 => Some(EventType::ButtonPress(Button::Middle)),
-                    event => Some(EventType::ButtonPress(Button::Unknown(event as u8))),
-                }
+                );
+                let button = if button_num == 2 {
+                    Button::Middle
+                } else {
+                    Button::Unknown(button_num as u8)
+                };
+                events.push(Event {
+                    event_type: EventType::ButtonPressRaw(button),
+                    time,
+                    unicode: None,
+                    platform_code: 0,
+                    position_code: 0,
+                    usb_hid: 0,
+                    extra_data,
+                });
+                events.push(Event {
+                    event_type: EventType::ButtonPress(button),
+                    time,
+                    unicode: None,
+                    platform_code: 0,
+                    position_code: 0,
+                    usb_hid: 0,
+                    extra_data,
+                });
             }
             CGEventType::OtherMouseUp => {
-                match CGEvent::integer_value_field(
+                let button_num = CGEvent::integer_value_field(
                     Some(cg_event_ref),
                     CGEventField::MouseEventButtonNumber,
-                ) {
-                    2 => Some(EventType::ButtonRelease(Button::Middle)),
-                    event => Some(EventType::ButtonRelease(Button::Unknown(event as u8))),
-                }
+                );
+                let button = if button_num == 2 {
+                    Button::Middle
+                } else {
+                    Button::Unknown(button_num as u8)
+                };
+                events.push(Event {
+                    event_type: EventType::ButtonReleaseRaw(button),
+                    time,
+                    unicode: None,
+                    platform_code: 0,
+                    position_code: 0,
+                    usb_hid: 0,
+                    extra_data,
+                });
+                events.push(Event {
+                    event_type: EventType::ButtonRelease(button),
+                    time,
+                    unicode: None,
+                    platform_code: 0,
+                    position_code: 0,
+                    usb_hid: 0,
+                    extra_data,
+                });
             }
             CGEventType::MouseMoved | CGEventType::LeftMouseDragged | CGEventType::RightMouseDragged => {
+                // Raw deltas (unaccelerated)
+                let delta_x = CGEvent::integer_value_field(
+                    Some(cg_event_ref),
+                    CGEventField::MouseEventDeltaX,
+                ) as i32;
+                let delta_y = CGEvent::integer_value_field(
+                    Some(cg_event_ref),
+                    CGEventField::MouseEventDeltaY,
+                ) as i32;
+                if delta_x != 0 || delta_y != 0 {
+                    events.push(Event {
+                        event_type: EventType::MouseMoveRaw { delta_x, delta_y },
+                        time,
+                        unicode: None,
+                        platform_code: 0,
+                        position_code: 0,
+                        usb_hid: 0,
+                        extra_data,
+                    });
+                }
+                // Absolute position
                 let point = CGEvent::location(Some(cg_event_ref));
-                Some(EventType::MouseMove {
-                    x: point.x,
-                    y: point.y,
-                })
+                events.push(Event {
+                    event_type: EventType::MouseMove {
+                        x: point.x,
+                        y: point.y,
+                    },
+                    time,
+                    unicode: None,
+                    platform_code: 0,
+                    position_code: 0,
+                    usb_hid: 0,
+                    extra_data,
+                });
             }
             CGEventType::KeyDown => {
-                code = get_code(cg_event_ref)?;
-                Some(EventType::KeyPress(key_from_code(code)))
+                if let Some(code) = get_code(cg_event_ref) {
+                    let key = key_from_code(code);
+                    let key_code = code as u32;
+                    #[allow(non_upper_case_globals)]
+                    let skip_unicode = matches!(
+                        code,
+                        kVK_Shift | kVK_RightShift | kVK_ForwardDelete
+                    );
+                    let unicode = if skip_unicode {
+                        None
+                    } else {
+                        let flags = CGEvent::flags(Some(cg_event_ref));
+                        keyboard_state.create_unicode_for_key(key_code, flags)
+                    };
+                    // Raw event
+                    events.push(Event {
+                        event_type: EventType::KeyPressRaw(key),
+                        time,
+                        unicode: unicode.clone(),
+                        platform_code: code as _,
+                        position_code: 0,
+                        usb_hid: 0,
+                        extra_data,
+                    });
+                    // Regular event
+                    events.push(Event {
+                        event_type: EventType::KeyPress(key),
+                        time,
+                        unicode,
+                        platform_code: code as _,
+                        position_code: 0,
+                        usb_hid: 0,
+                        extra_data,
+                    });
+                }
             }
             CGEventType::KeyUp => {
-                code = get_code(cg_event_ref)?;
-                Some(EventType::KeyRelease(key_from_code(code)))
+                if let Some(code) = get_code(cg_event_ref) {
+                    let key = key_from_code(code);
+                    // Raw event
+                    events.push(Event {
+                        event_type: EventType::KeyReleaseRaw(key),
+                        time,
+                        unicode: None,
+                        platform_code: code as _,
+                        position_code: 0,
+                        usb_hid: 0,
+                        extra_data,
+                    });
+                    // Regular event
+                    events.push(Event {
+                        event_type: EventType::KeyRelease(key),
+                        time,
+                        unicode: None,
+                        platform_code: code as _,
+                        position_code: 0,
+                        usb_hid: 0,
+                        extra_data,
+                    });
+                }
             }
             CGEventType::FlagsChanged => {
-                code = get_code(cg_event_ref)?;
-                let flags = CGEvent::flags(Some(cg_event_ref));
-                let mut global_flags = LAST_FLAGS.lock().unwrap();
-                if flags < *global_flags {
-                    *global_flags = flags;
-                    Some(EventType::KeyRelease(key_from_code(code)))
-                } else {
-                    *global_flags = flags;
-                    Some(EventType::KeyPress(key_from_code(code)))
+                if let Some(code) = get_code(cg_event_ref) {
+                    let key = key_from_code(code);
+                    let flags = CGEvent::flags(Some(cg_event_ref));
+                    let mut global_flags = LAST_FLAGS.lock().unwrap();
+                    let (event_type, raw_event_type) = if flags < *global_flags {
+                        *global_flags = flags;
+                        (EventType::KeyRelease(key), EventType::KeyReleaseRaw(key))
+                    } else {
+                        *global_flags = flags;
+                        (EventType::KeyPress(key), EventType::KeyPressRaw(key))
+                    };
+                    // Raw event
+                    events.push(Event {
+                        event_type: raw_event_type,
+                        time,
+                        unicode: None,
+                        platform_code: code as _,
+                        position_code: 0,
+                        usb_hid: 0,
+                        extra_data,
+                    });
+                    // Regular event
+                    events.push(Event {
+                        event_type,
+                        time,
+                        unicode: None,
+                        platform_code: code as _,
+                        position_code: 0,
+                        usb_hid: 0,
+                        extra_data,
+                    });
                 }
             }
             CGEventType::ScrollWheel => {
@@ -149,51 +382,37 @@ pub unsafe fn convert(
                     Some(cg_event_ref),
                     CGEventField::ScrollWheelEventPointDeltaAxis2,
                 );
-                Some(EventType::Wheel {
-                    delta_x: delta_x as f64,
-                    delta_y: delta_y as f64,
-                })
+                // Raw wheel event
+                events.push(Event {
+                    event_type: EventType::WheelRaw {
+                        delta_x: delta_x as f64,
+                        delta_y: delta_y as f64,
+                    },
+                    time,
+                    unicode: None,
+                    platform_code: 0,
+                    position_code: 0,
+                    usb_hid: 0,
+                    extra_data,
+                });
+                // Absolute wheel event (for compatibility)
+                events.push(Event {
+                    event_type: EventType::Wheel {
+                        delta_x: delta_x as f64,
+                        delta_y: delta_y as f64,
+                    },
+                    time,
+                    unicode: None,
+                    platform_code: 0,
+                    position_code: 0,
+                    usb_hid: 0,
+                    extra_data,
+                });
             }
-            _ => None,
-        };
-        if let Some(event_type) = option_type {
-            let unicode = match event_type {
-                EventType::KeyPress(..) => {
-                    let key_code = CGEvent::integer_value_field(
-                        Some(cg_event_ref),
-                        CGEventField::KeyboardEventKeycode,
-                    ) as u32;
-                    #[allow(non_upper_case_globals)]
-                    let skip_unicode = matches!(
-                        key_code as CGKeyCode,
-                        kVK_Shift | kVK_RightShift | kVK_ForwardDelete
-                    );
-                    if skip_unicode {
-                        None
-                    } else {
-                        let flags = CGEvent::flags(Some(cg_event_ref));
-                        keyboard_state.create_unicode_for_key(key_code, flags)
-                    }
-                }
-                EventType::KeyRelease(..) => None,
-                _ => None,
-            };
-            let extra_data = CGEvent::integer_value_field(
-                Some(cg_event_ref),
-                CGEventField::EventSourceUserData,
-            );
-            return Some(Event {
-                event_type,
-                time: SystemTime::now(),
-                unicode,
-                platform_code: code as _,
-                position_code: 0 as _,
-                usb_hid: 0,
-                extra_data,
-            });
+            _ => {}
         }
+        events
     }
-    None
 }
 
 #[allow(dead_code)]

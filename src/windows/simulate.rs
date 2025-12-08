@@ -193,6 +193,16 @@ pub fn simulate(event_type: &EventType) -> Result<(), SimulateError> {
                 (*y as i32 + 1) * 65535 / height,
             )
         }
+        // Raw events are capture-only, they cannot be simulated
+        // Use the non-raw variants (ButtonPress, MouseMove, Wheel, KeyPress) for simulation
+        EventType::MouseMoveRaw { .. }
+        | EventType::ButtonPressRaw(_)
+        | EventType::ButtonReleaseRaw(_)
+        | EventType::WheelRaw { .. }
+        | EventType::KeyPressRaw(_)
+        | EventType::KeyReleaseRaw(_) => {
+            Err(SimulateError) // Raw events cannot be simulated
+        }
     }
 }
 

@@ -335,6 +335,33 @@ pub enum EventType {
         delta_x: f64,
         delta_y: f64,
     },
+
+    // Raw events:
+    // These cannot be blocked by any user-mode application.
+    // Windows: Raw Input API, macOS: CGEventTap at HID level
+
+    /// Raw mouse movement with relative deltas
+    /// This is the hardware signal, unaffected by mouse acceleration or DPI settings.
+    MouseMoveRaw {
+        delta_x: i32,
+        delta_y: i32,
+    },
+    /// Raw button press event from hardware.
+    ButtonPressRaw(Button),
+    /// Raw button release event from hardware.
+    ButtonReleaseRaw(Button),
+    /// Raw scroll/wheel event with deltas. From Raw Input (Windows) or
+    /// CGEventTap (macOS). Values are in scroll units (typically 1.0 = one line).
+    WheelRaw {
+        delta_x: f64,
+        delta_y: f64,
+    },
+    /// Raw key press event from hardware.
+    /// Windows: from Raw Input API, macOS: from CGEventTap at HID level.
+    KeyPressRaw(Key),
+    /// Raw key release event from hardware.
+    /// Windows: from Raw Input API, macOS: from CGEventTap at HID level.
+    KeyReleaseRaw(Key),
 }
 
 /// The Unicode information of input.
