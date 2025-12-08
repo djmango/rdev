@@ -75,6 +75,13 @@ unsafe fn send_native(event_type: &EventType, display: *mut xlib::Display) -> Op
             xtest::XTestFakeButtonEvent(display, code, TRUE, 0)
                 & xtest::XTestFakeButtonEvent(display, code, FALSE, 0)
         }
+        // Raw events are for capture only, not simulation
+        EventType::MouseMoveRaw { .. }
+        | EventType::ButtonPressRaw(_)
+        | EventType::ButtonReleaseRaw(_)
+        | EventType::WheelRaw { .. }
+        | EventType::KeyPressRaw(_)
+        | EventType::KeyReleaseRaw(_) => return None,
     };
     if res == 0 {
         None
