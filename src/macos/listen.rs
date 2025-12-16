@@ -68,8 +68,8 @@ where
         let loop_source = CFMachPort::new_run_loop_source(None, Some(&tap), 0)
             .ok_or(ListenError::LoopSourceError)?;
 
-        let main_loop = CFRunLoop::main().ok_or(ListenError::LoopSourceError)?;
-        main_loop.add_source(Some(&loop_source), kCFRunLoopCommonModes);
+        let current_loop = CFRunLoop::current().ok_or(ListenError::LoopSourceError)?;
+        current_loop.add_source(Some(&loop_source), kCFRunLoopCommonModes);
 
         CGEvent::tap_enable(&tap, true);
         CFRunLoop::run();
