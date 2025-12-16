@@ -35,9 +35,9 @@ pub fn set_keyboard_extra_info(extra: usize) {
 }
 
 fn sim_mouse_event(flags: DWORD, data: DWORD, dx: LONG, dy: LONG) -> Result<(), SimulateError> {
-    let mut union: INPUT_u = unsafe { std::mem::zeroed() };
-    let inner_union = unsafe { union.mi_mut() };
     unsafe {
+        let mut union: INPUT_u = std::mem::zeroed();
+        let inner_union = union.mi_mut();
         *inner_union = MOUSEINPUT {
             dx,
             dy,
@@ -46,29 +46,27 @@ fn sim_mouse_event(flags: DWORD, data: DWORD, dx: LONG, dy: LONG) -> Result<(), 
             time: 0,
             dwExtraInfo: DW_MOUSE_EXTRA_INFO.load(Ordering::Relaxed),
         };
-    }
-    let mut input = [INPUT {
-        type_: INPUT_MOUSE,
-        u: union,
-    }; 1];
-    let value = unsafe {
-        SendInput(
+        let mut input = [INPUT {
+            type_: INPUT_MOUSE,
+            u: union,
+        }; 1];
+        let value = SendInput(
             input.len() as UINT,
             input.as_mut_ptr(),
             size_of::<INPUT>() as c_int,
-        )
-    };
-    if value != 1 {
-        Err(SimulateError)
-    } else {
-        Ok(())
+        );
+        if value != 1 {
+            Err(SimulateError)
+        } else {
+            Ok(())
+        }
     }
 }
 
 fn sim_keyboard_event(flags: DWORD, vk: WORD, scan: WORD) -> Result<(), SimulateError> {
-    let mut union: INPUT_u = unsafe { std::mem::zeroed() };
-    let inner_union = unsafe { union.ki_mut() };
     unsafe {
+        let mut union: INPUT_u = std::mem::zeroed();
+        let inner_union = union.ki_mut();
         *inner_union = KEYBDINPUT {
             wVk: vk,
             wScan: scan,
@@ -76,22 +74,20 @@ fn sim_keyboard_event(flags: DWORD, vk: WORD, scan: WORD) -> Result<(), Simulate
             time: 0,
             dwExtraInfo: DW_KEYBOARD_EXTRA_INFO.load(Ordering::Relaxed),
         };
-    }
-    let mut input = [INPUT {
-        type_: INPUT_KEYBOARD,
-        u: union,
-    }; 1];
-    let value = unsafe {
-        SendInput(
+        let mut input = [INPUT {
+            type_: INPUT_KEYBOARD,
+            u: union,
+        }; 1];
+        let value = SendInput(
             input.len() as UINT,
             input.as_mut_ptr(),
             size_of::<INPUT>() as c_int,
-        )
-    };
-    if value != 1 {
-        Err(SimulateError)
-    } else {
-        Ok(())
+        );
+        if value != 1 {
+            Err(SimulateError)
+        } else {
+            Ok(())
+        }
     }
 }
 
