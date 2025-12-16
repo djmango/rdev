@@ -56,7 +56,7 @@ where
         let _pool = NSAutoreleasePool::new();
         let tap_callback: CGEventTapCallBack = Some(raw_callback);
         let tap = CGEvent::tap_create(
-            CGEventTapLocation::HIDEventTap, // HID for listen-only
+            CGEventTapLocation::SessionEventTap,
             CGEventTapPlacement::HeadInsertEventTap,
             CGEventTapOptions::ListenOnly,
             event_mask,
