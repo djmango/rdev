@@ -4,7 +4,7 @@ use crate::rdev::{EventType, KeyboardState, UnicodeInfo};
 use std::convert::TryInto;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_uint, c_ulong, c_void};
-use std::ptr::{null, null_mut, NonNull};
+use std::ptr::{NonNull, null, null_mut};
 use x11::xlib::{self, KeySym, XKeyEvent, XKeysymToString, XSupportsLocale};
 
 #[derive(Debug)]
@@ -130,117 +130,122 @@ impl Keyboard {
         }
     }
 
-    pub(crate) unsafe fn get_current_modifiers(&mut self) -> Option<u32> { unsafe {
-        let MyDisplay(display) = *self.display;
-        let screen_number = xlib::XDefaultScreen(display);
-        let screen = xlib::XScreenOfDisplay(display, screen_number);
-        let window = xlib::XRootWindowOfScreen(screen);
-        // Passing null pointers for the things we don't need results in a
-        // segfault.
-        let mut root_return: xlib::Window = 0;
-        let mut child_return: xlib::Window = 0;
-        let mut root_x_return = 0;
-        let mut root_y_return = 0;
-        let mut win_x_return = 0;
-        let mut win_y_return = 0;
-        let mut mask_return = 0;
-        xlib::XQueryPointer(
-            display,
-            window,
-            &mut root_return,
-            &mut child_return,
-            &mut root_x_return,
-            &mut root_y_return,
-            &mut win_x_return,
-            &mut win_y_return,
-            &mut mask_return,
-        );
-        Some(mask_return)
-    }}
+    pub(crate) unsafe fn get_current_modifiers(&mut self) -> Option<u32> {
+        unsafe {
+            let MyDisplay(display) = *self.display;
+            let screen_number = xlib::XDefaultScreen(display);
+            let screen = xlib::XScreenOfDisplay(display, screen_number);
+            let window = xlib::XRootWindowOfScreen(screen);
+            // Passing null pointers for the things we don't need results in a
+            // segfault.
+            let mut root_return: xlib::Window = 0;
+            let mut child_return: xlib::Window = 0;
+            let mut root_x_return = 0;
+            let mut root_y_return = 0;
+            let mut win_x_return = 0;
+            let mut win_y_return = 0;
+            let mut mask_return = 0;
+            xlib::XQueryPointer(
+                display,
+                window,
+                &mut root_return,
+                &mut child_return,
+                &mut root_x_return,
+                &mut root_y_return,
+                &mut win_x_return,
+                &mut win_y_return,
+                &mut mask_return,
+            );
+            Some(mask_return)
+        }
+    }
 
     pub(crate) unsafe fn unicode_from_code(
         &mut self,
         keycode: c_uint,
         state: c_uint,
-    ) -> Option<UnicodeInfo> { unsafe {
-        let MyDisplay(display) = *self.display;
-        let MyXIC(xic) = *self.xic;
-        if display.is_null() || xic.is_null() {
-            println!("We don't seem to have a display or a xic");
-            return None;
-        }
-        const BUF_LEN: usize = 4;
-        let mut buf = [0_u8; BUF_LEN];
-        let MyDisplay(display) = *self.display;
-        let mut key = xlib::XKeyEvent {
-            display,
-            root: 0,
-            window: *self.window,
-            subwindow: 0,
-            x: 0,
-            y: 0,
-            x_root: 0,
-            y_root: 0,
-            state,
-            keycode,
-            same_screen: 0,
-            send_event: 0,
-            serial: self.serial,
-            type_: xlib::KeyPress,
-            time: xlib::CurrentTime,
-        };
-        self.serial += 1;
+    ) -> Option<UnicodeInfo> {
+        unsafe {
+            let MyDisplay(display) = *self.display;
+            let MyXIC(xic) = *self.xic;
+            if display.is_null() || xic.is_null() {
+                println!("We don't seem to have a display or a xic");
+                return None;
+            }
+            const BUF_LEN: usize = 4;
+            let mut buf = [0_u8; BUF_LEN];
+            let MyDisplay(display) = *self.display;
+            let mut key = xlib::XKeyEvent {
+                display,
+                root: 0,
+                window: *self.window,
+                subwindow: 0,
+                x: 0,
+                y: 0,
+                x_root: 0,
+                y_root: 0,
+                state,
+                keycode,
+                same_screen: 0,
+                send_event: 0,
+                serial: self.serial,
+                type_: xlib::KeyPress,
+                time: xlib::CurrentTime,
+            };
+            self.serial += 1;
 
-        let mut event = xlib::XEvent { key };
+            let mut event = xlib::XEvent { key };
 
-        // -----------------------------------------------------------------
-        // XXX: This is **OMEGA IMPORTANT** This is what enables us to receive
-        // the correct keyvalue from the utf8LookupString !!
-        // https://stackoverflow.com/questions/18246848/get-utf-8-input-with-x11-display#
-        // -----------------------------------------------------------------
-        xlib::XFilterEvent(&mut event, 0);
+            // -----------------------------------------------------------------
+            // XXX: This is **OMEGA IMPORTANT** This is what enables us to receive
+            // the correct keyvalue from the utf8LookupString !!
+            // https://stackoverflow.com/questions/18246848/get-utf-8-input-with-x11-display#
+            // -----------------------------------------------------------------
+            xlib::XFilterEvent(&mut event, 0);
 
-        let MyXIC(xic) = *self.xic;
-        let ret = xlib::Xutf8LookupString(
-            xic,
-            &mut event.key,
-            buf.as_mut_ptr() as *mut c_char,
-            BUF_LEN as c_int,
-            &mut *self.keysym,
-            &mut *self.status,
-        );
+            let MyXIC(xic) = *self.xic;
+            let ret = xlib::Xutf8LookupString(
+                xic,
+                &mut event.key,
+                buf.as_mut_ptr() as *mut c_char,
+                BUF_LEN as c_int,
+                &mut *self.keysym,
+                &mut *self.status,
+            );
 
-        let keysym = xlookup_string(&mut key);
-        self.keysym = Box::new(keysym);
-        if self.is_dead() {
-            return Some(UnicodeInfo {
-                name: None,
-                unicode: Vec::new(),
-                is_dead: true,
-            });
-        }
-        if ret == xlib::NoSymbol {
-            return None;
-        }
+            let keysym = xlookup_string(&mut key);
+            self.keysym = Box::new(keysym);
+            if self.is_dead() {
+                return Some(UnicodeInfo {
+                    name: None,
+                    unicode: Vec::new(),
+                    is_dead: true,
+                });
+            }
+            if ret == xlib::NoSymbol {
+                return None;
+            }
 
-        let len = buf.iter().position(|ch| ch == &0).unwrap_or(BUF_LEN);
+            let len = buf.iter().position(|ch| ch == &0).unwrap_or(BUF_LEN);
 
-        // C0 controls
-        if len == 1 {
-            if let Ok(s) = String::from_utf8(buf[..len].to_vec()) {
-                if let Some(c) = s.chars().next()
-                    && ('\u{1}'..='\u{1f}').contains(&c) {
+            // C0 controls
+            if len == 1 {
+                if let Ok(s) = String::from_utf8(buf[..len].to_vec()) {
+                    if let Some(c) = s.chars().next()
+                        && ('\u{1}'..='\u{1f}').contains(&c)
+                    {
                         return None;
                     }
+                }
             }
-        }
 
-        Some(UnicodeInfo {
-            name: String::from_utf8(buf[..len].to_vec()).ok(),
-            unicode: Vec::new(),
-            is_dead: false,
-        })
-    }}
+            Some(UnicodeInfo {
+                name: String::from_utf8(buf[..len].to_vec()).ok(),
+                unicode: Vec::new(),
+                is_dead: false,
+            })
+        }
+    }
 
     pub fn is_dead(&mut self) -> bool {
         let ptr = unsafe { XKeysymToString(*self.keysym) };

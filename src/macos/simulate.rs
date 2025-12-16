@@ -7,16 +7,17 @@ use objc2_core_graphics::{
 };
 
 use crate::macos::common::LAST_FLAGS;
+use std::sync::atomic::{AtomicI64, Ordering};
 
-static mut MOUSE_EXTRA_INFO: i64 = 0;
-static mut KEYBOARD_EXTRA_INFO: i64 = 0;
+static MOUSE_EXTRA_INFO: AtomicI64 = AtomicI64::new(0);
+static KEYBOARD_EXTRA_INFO: AtomicI64 = AtomicI64::new(0);
 
 pub fn set_mouse_extra_info(extra: i64) {
-    unsafe { MOUSE_EXTRA_INFO = extra }
+    MOUSE_EXTRA_INFO.store(extra, Ordering::Relaxed);
 }
 
 pub fn set_keyboard_extra_info(extra: i64) {
-    unsafe { KEYBOARD_EXTRA_INFO = extra }
+    KEYBOARD_EXTRA_INFO.store(extra, Ordering::Relaxed);
 }
 
 #[allow(non_upper_case_globals)]
@@ -69,8 +70,10 @@ unsafe fn convert_native_with_source(
                 crate::Key::RawKey(rawkey) => {
                     if let RawKey::MacVirtualKeycode(keycode) = rawkey {
                         let event = CGEvent::new_keyboard_event(Some(source), *keycode, true)?;
-                        // Apply current modifier flags
-                        CGEvent::set_flags(Some(&event), *LAST_FLAGS.lock().unwrap());
+                        // Apply current modifier flags from atomic
+                        let flags =
+                            objc2_core_graphics::CGEventFlags(LAST_FLAGS.load(Ordering::Acquire));
+                        CGEvent::set_flags(Some(&event), flags);
                         Some(event)
                     } else {
                         None
@@ -79,7 +82,9 @@ unsafe fn convert_native_with_source(
                 _ => {
                     let code = code_from_key(*key)?;
                     let event = CGEvent::new_keyboard_event(Some(source), code, true)?;
-                    CGEvent::set_flags(Some(&event), *LAST_FLAGS.lock().unwrap());
+                    let flags =
+                        objc2_core_graphics::CGEventFlags(LAST_FLAGS.load(Ordering::Acquire));
+                    CGEvent::set_flags(Some(&event), flags);
                     Some(event)
                 }
             },
@@ -87,7 +92,9 @@ unsafe fn convert_native_with_source(
                 crate::Key::RawKey(rawkey) => {
                     if let RawKey::MacVirtualKeycode(keycode) = rawkey {
                         let event = CGEvent::new_keyboard_event(Some(source), *keycode, false)?;
-                        CGEvent::set_flags(Some(&event), *LAST_FLAGS.lock().unwrap());
+                        let flags =
+                            objc2_core_graphics::CGEventFlags(LAST_FLAGS.load(Ordering::Acquire));
+                        CGEvent::set_flags(Some(&event), flags);
                         workaround_fn(&event, *keycode);
                         Some(event)
                     } else {
@@ -97,7 +104,9 @@ unsafe fn convert_native_with_source(
                 _ => {
                     let code = code_from_key(*key)?;
                     let event = CGEvent::new_keyboard_event(Some(source), code, false)?;
-                    CGEvent::set_flags(Some(&event), *LAST_FLAGS.lock().unwrap());
+                    let flags =
+                        objc2_core_graphics::CGEventFlags(LAST_FLAGS.load(Ordering::Acquire));
+                    CGEvent::set_flags(Some(&event), flags);
                     workaround_fn(&event, code);
                     Some(event)
                 }
@@ -123,12 +132,7 @@ unsafe fn convert_native_with_source(
                     Button::Right => CGEventType::RightMouseUp,
                     _ => return None,
                 };
-                CGEvent::new_mouse_event(
-                    Some(source),
-                    event_type,
-                    point,
-                    CGMouseButton::Left,
-                )
+                CGEvent::new_mouse_event(Some(source), event_type, point, CGMouseButton::Left)
             }
             EventType::MouseMove { x, y } => {
                 let point = CGPoint { x: *x, y: *y };
@@ -183,7 +187,7 @@ pub fn simulate(event_type: &EventType) -> Result<(), SimulateError> {
         CGEvent::set_integer_value_field(
             Some(&cg_event),
             CGEventField::EventSourceUserData,
-            unsafe { MOUSE_EXTRA_INFO },
+            MOUSE_EXTRA_INFO.load(Ordering::Relaxed),
         );
         CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&cg_event));
         Ok(())

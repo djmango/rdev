@@ -1,13 +1,13 @@
 #[cfg(target_os = "linux")]
 use core::time;
+use rdev::{Event, EventType, GrabError, Key as RdevKey};
 #[cfg(target_os = "linux")]
 use rdev::{key_from_code, linux_keycode_from_key, simulate};
-use rdev::{Event, EventType, GrabError, Key as RdevKey};
 #[cfg(target_os = "linux")]
 use std::{collections::HashMap, mem::zeroed, os::raw::c_int, ptr, thread, time::SystemTime};
 use std::{
     collections::HashSet,
-    sync::{mpsc::Sender, Arc, Mutex},
+    sync::{Arc, Mutex, mpsc::Sender},
 };
 #[cfg(target_os = "linux")]
 use strum::IntoEnumIterator;

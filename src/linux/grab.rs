@@ -1,17 +1,19 @@
 use crate::rdev::UnicodeInfo;
 // This code is awful. Good luck
-use crate::{key_from_code, Event, EventType, GrabError, Keyboard, KeyboardState};
+use crate::{Event, EventType, GrabError, Keyboard, KeyboardState, key_from_code};
+use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 use log::error;
-use mio::{unix::SourceFd, Events, Interest, Poll, Token};
+use mio::{Events, Interest, Poll, Token, unix::SourceFd};
+use parking_lot::Mutex;
 use std::{
     mem::zeroed,
     os::raw::c_int,
     ptr,
     sync::{
-        mpsc::{channel, Receiver, Sender},
-        Arc, Mutex,
+        Arc, LazyLock, OnceLock,
+        atomic::{AtomicBool, Ordering},
     },
-    thread,
+    thread::{self, JoinHandle},
     time::{Duration, SystemTime},
 };
 use x11::xlib::{self, GrabModeAsync, KeyPressMask, KeyReleaseMask, Window};
@@ -39,15 +41,20 @@ struct KeyboardGrabber {
 unsafe impl Send for KeyboardGrabber {}
 unsafe impl Sync for KeyboardGrabber {}
 
-lazy_static::lazy_static! {
-    static ref GRAB_KEY_EVENT_SENDER: Arc<Mutex<Option<Sender<GrabEvent>>>> = Arc::new(Mutex::new(None));
-    static ref GRAB_CONTROL_SENDER: Arc<Mutex<Option<Sender<GrabControl>>>> = Arc::new(Mutex::new(None));
-}
+static GRAB_KEY_EVENT_SENDER: LazyLock<Mutex<Option<Sender<GrabEvent>>>> =
+    LazyLock::new(|| Mutex::new(None));
+static GRAB_CONTROL_SENDER: LazyLock<Mutex<Option<Sender<GrabControl>>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+// Store thread handles for proper cleanup
+static THREAD_HANDLES: LazyLock<Mutex<Vec<JoinHandle<()>>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
+
+type GrabCallbackType = Mutex<Box<dyn FnMut(Event) -> Option<Event> + Send>>;
 
 const KEYPRESS_EVENT: i32 = 2;
-// It is ok to use unsafe mut here.
-static mut IS_GRABBING: bool = false;
-static mut GLOBAL_CALLBACK: Option<Box<dyn FnMut(Event) -> Option<Event>>> = None;
+static IS_GRABBING: AtomicBool = AtomicBool::new(false);
+static GLOBAL_CALLBACK: OnceLock<GrabCallbackType> = OnceLock::new();
 const GRAB_RECV: Token = Token(0);
 
 impl KeyboardGrabber {
@@ -92,8 +99,8 @@ impl KeyboardGrabber {
             .register(&mut SourceFd(&self.grab_fd), GRAB_RECV, Interest::READABLE)
             .map_err(GrabError::IoError)?;
 
-        let (tx, rx) = channel();
-        GRAB_CONTROL_SENDER.lock().unwrap().replace(tx);
+        let (tx, rx) = unbounded();
+        *GRAB_CONTROL_SENDER.lock() = Some(tx);
 
         let display_lock = Arc::new(Mutex::new(self.display as u64));
         start_grab_control_thread(display_lock.clone(), self.window, rx);
@@ -154,33 +161,44 @@ fn convert_event(code: u32, is_press: bool) -> Event {
         platform_code,
         position_code: code as _,
         usb_hid: 0,
+        // Linux does not have an API to detect synthetic events
+        is_synthetic: false,
     }
 }
 
 fn grab_keys(display: Arc<Mutex<u64>>, grab_window: libc::c_ulong) {
     unsafe {
-        let lock = display.lock().unwrap();
-        let display = *lock as *mut xlib::Display;
-        xlib::XGrabKeyboard(
-            display,
-            grab_window,
-            c_int::from(true),
-            GrabModeAsync,
-            GrabModeAsync,
-            xlib::CurrentTime,
-        );
-        xlib::XFlush(display);
+        // Minimize lock duration - don't hold during sleep
+        let display_ptr = {
+            let lock = display.lock();
+            let display_ptr = *lock as *mut xlib::Display;
+            xlib::XGrabKeyboard(
+                display_ptr,
+                grab_window,
+                c_int::from(true),
+                GrabModeAsync,
+                GrabModeAsync,
+                xlib::CurrentTime,
+            );
+            xlib::XFlush(display_ptr);
+            display_ptr
+        };
+        // Lock released here before sleep
+        thread::sleep(Duration::from_millis(50));
     }
-    thread::sleep(Duration::from_millis(50));
 }
 
 fn ungrab_keys(display: Arc<Mutex<u64>>) {
-    {
-        let lock = display.lock().unwrap();
-        let display = *lock as *mut xlib::Display;
-        ungrab_keys_(display);
+    unsafe {
+        // Minimize lock duration - don't hold during sleep
+        {
+            let lock = display.lock();
+            let display = *lock as *mut xlib::Display;
+            ungrab_keys_(display);
+        }
+        // Lock released here before sleep
+        thread::sleep(Duration::from_millis(50));
     }
-    thread::sleep(Duration::from_millis(50));
 }
 
 fn ungrab_keys_(display: *mut xlib::Display) {
@@ -191,25 +209,33 @@ fn ungrab_keys_(display: *mut xlib::Display) {
 }
 
 fn start_callback_event_thread(recv: Receiver<GrabEvent>) {
-    thread::spawn(move || loop {
-        if let Ok(data) = recv.recv() {
-            match data {
-                GrabEvent::KeyEvent(event) => unsafe {
-                    if let Some(callback) = &mut *(&raw mut GLOBAL_CALLBACK) {
+    let handle = thread::spawn(move || {
+        loop {
+            match recv.recv() {
+                Ok(GrabEvent::KeyEvent(event)) => {
+                    if let Some(callback_mutex) = GLOBAL_CALLBACK.get() {
+                        let mut callback = callback_mutex.lock();
                         callback(event);
                     }
-                },
-                GrabEvent::Exit => {
+                }
+                Ok(GrabEvent::Exit) => {
+                    break;
+                }
+                Err(_) => {
+                    // Channel disconnected, exit
                     break;
                 }
             }
         }
     });
+
+    // Store thread handle for cleanup
+    THREAD_HANDLES.lock().push(handle);
 }
 
 fn start_grab_service() -> Result<(), GrabError> {
-    let (tx, rx) = channel::<GrabEvent>();
-    *GRAB_KEY_EVENT_SENDER.lock().unwrap() = Some(tx);
+    let (tx, rx) = unbounded::<GrabEvent>();
+    *GRAB_KEY_EVENT_SENDER.lock() = Some(tx);
 
     unsafe {
         // to-do: is display pointer in keyboard always valid?
@@ -236,8 +262,8 @@ fn read_x_event(x_event: &mut xlib::XEvent, display: *mut xlib::Display) {
         let keycode = unsafe { x_event.key.keycode };
         let is_press = unsafe { x_event.type_ == KEYPRESS_EVENT };
         let event = convert_event(keycode, is_press);
-        if let Some(tx) = GRAB_KEY_EVENT_SENDER.lock().unwrap().as_ref() {
-            tx.send(GrabEvent::KeyEvent(event)).ok();
+        if let Some(tx) = GRAB_KEY_EVENT_SENDER.lock().as_ref() {
+            let _ = tx.send(GrabEvent::KeyEvent(event));
         }
     }
 }
@@ -247,14 +273,12 @@ fn start_grab_control_thread(
     grab_window: Window,
     rx: Receiver<GrabControl>,
 ) {
-    std::thread::spawn(move || {
+    let handle = std::thread::spawn(move || {
         loop {
             match rx.recv() {
                 Ok(evt) => match evt {
                     GrabControl::Exit => {
-                        unsafe {
-                            IS_GRABBING = false;
-                        }
+                        IS_GRABBING.store(false, Ordering::SeqCst);
                         break;
                     }
                     GrabControl::Grab => {
@@ -265,20 +289,23 @@ fn start_grab_control_thread(
                     }
                 },
                 Err(e) => {
-                    // unreachable
+                    // Channel disconnected
                     log::error!("Failed to receive event, {}", e);
                     break;
                 }
             }
         }
     });
+
+    // Store thread handle for cleanup
+    THREAD_HANDLES.lock().push(handle);
 }
 
 fn loop_poll_x_event(display: Arc<Mutex<u64>>, mut poll: Poll) {
     let mut x_event: xlib::XEvent = unsafe { zeroed() };
     let mut events = Events::with_capacity(128);
     loop {
-        if unsafe { !IS_GRABBING } {
+        if !IS_GRABBING.load(Ordering::SeqCst) {
             break;
         }
 
@@ -286,9 +313,12 @@ fn loop_poll_x_event(display: Arc<Mutex<u64>>, mut poll: Poll) {
             Ok(_) => {
                 for event in &events {
                     if event.token() == GRAB_RECV {
-                        let lock = display.lock().unwrap();
-                        let display = *lock as *mut xlib::Display;
-                        read_x_event(&mut x_event, display);
+                        // Minimize lock duration
+                        let display_ptr = {
+                            let lock = display.lock();
+                            *lock as *mut xlib::Display
+                        };
+                        read_x_event(&mut x_event, display_ptr);
                     }
                 }
             }
@@ -307,21 +337,19 @@ fn start_grab() -> Result<(), GrabError> {
 }
 
 fn start_grab_thread() {
-    thread::spawn(|| {
+    let handle = thread::spawn(|| {
         let mut c = 0;
         loop {
-            unsafe {
-                if !IS_GRABBING {
-                    break;
-                }
+            if !IS_GRABBING.load(Ordering::SeqCst) {
+                break;
             }
+
             if let Err(err) = start_grab() {
                 log::debug!("Failed to start grab keyboard, {:?}", err);
                 if c <= 3 {
                     c += 1;
                     thread::sleep(Duration::from_millis(100));
-                }
-                if c > 3 && c < 10 {
+                } else if c < 10 {
                     thread::sleep(Duration::from_millis(c * 100));
                 } else {
                     thread::sleep(Duration::from_millis(1000));
@@ -331,10 +359,13 @@ fn start_grab_thread() {
             }
         }
     });
+
+    // Store thread handle for cleanup
+    THREAD_HANDLES.lock().push(handle);
 }
 
 fn send_grab_control(data: GrabControl) {
-    match GRAB_CONTROL_SENDER.lock().unwrap().as_ref() {
+    match GRAB_CONTROL_SENDER.lock().as_ref() {
         Some(sender) => {
             if let Err(e) = sender.send(data) {
                 error!("Failed to send grab command, {e}");
@@ -359,20 +390,22 @@ pub fn disable_grab() {
 
 #[inline]
 pub fn is_grabbed() -> bool {
-    unsafe { IS_GRABBING }
+    IS_GRABBING.load(Ordering::SeqCst)
 }
 
 pub fn start_grab_listen<T>(callback: T) -> Result<(), GrabError>
 where
-    T: FnMut(Event) -> Option<Event> + 'static,
+    T: FnMut(Event) -> Option<Event> + Send + 'static,
 {
     if is_grabbed() {
         return Ok(());
     }
 
-    unsafe {
-        IS_GRABBING = true;
-        GLOBAL_CALLBACK = Some(Box::new(callback));
+    IS_GRABBING.store(true, Ordering::SeqCst);
+
+    // Initialize callback in OnceLock
+    if GLOBAL_CALLBACK.set(Mutex::new(Box::new(callback))).is_err() {
+        log::warn!("start_grab_listen() called multiple times, ignoring previous callback");
     }
 
     start_grab_service()?;
@@ -381,11 +414,17 @@ where
 }
 
 pub fn exit_grab_listen() {
-    unsafe {
-        IS_GRABBING = false;
-    }
-    if let Some(tx) = GRAB_KEY_EVENT_SENDER.lock().unwrap().as_ref() {
-        tx.send(GrabEvent::Exit).ok();
+    IS_GRABBING.store(false, Ordering::SeqCst);
+
+    if let Some(tx) = GRAB_KEY_EVENT_SENDER.lock().as_ref() {
+        let _ = tx.send(GrabEvent::Exit);
     }
     send_grab_control(GrabControl::Exit);
+
+    // Join all threads for proper cleanup
+    let mut handles = THREAD_HANDLES.lock();
+    for handle in handles.drain(..) {
+        // Give threads a moment to exit gracefully
+        let _ = handle.join();
+    }
 }

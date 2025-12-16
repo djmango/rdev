@@ -31,19 +31,39 @@ fn callback(event: Event) {
 }
 ```
 
-### OS Caveats:
-When using the `listen` function, the following caveats apply:
+## Threading Requirements
 
-### Mac OS
-The process running the blocking `listen` function (loop) needs to be the parent process (no fork before).
-The process needs to be granted access to the Accessibility API (ie. if you're running your process
-inside Terminal.app, then Terminal.app needs to be added in
-System Preferences > Security & Privacy > Privacy > Accessibility)
-If the process is not granted access to the Accessibility API, MacOS will silently ignore rdev's
-`listen` calleback and will not trigger it with events. No error will be generated.
+### macOS
+The `listen()` and `grab()` functions **must** be called from the main thread. They use CoreFoundation's CFRunLoop which requires main thread execution. The process needs to be granted access to the Accessibility API (ie. if you're running your process inside Terminal.app, then Terminal.app needs to be added in System Preferences > Security & Privacy > Privacy > Accessibility).
+
+**Note:** Unicode translation for keyboard events is now automatically handled via dispatch to the main thread, eliminating previous crashes.
+
+### Windows  
+The `listen()` and `grab()` functions should typically be called from the main thread or a dedicated thread with a message loop.
 
 ### Linux
-The `listen` function uses X11 APIs, and so will not work in Wayland or in the linux kernel virtual console
+The `listen()` and `grab()` functions can run on any thread. The `listen` function uses X11 APIs, and so will not work in Wayland or in the linux kernel virtual console.
+
+### All Platforms
+**Important:** Callbacks execute on OS-specific event threads, NOT the calling thread. For complex processing or communication with your main application, use channels (like `crossbeam-channel`) to send events to your application's processing thread.
+
+Example with channels:
+```rust
+use rdev::listen;
+use crossbeam_channel::unbounded;
+
+let (tx, rx) = unbounded();
+std::thread::spawn(move || {
+    listen(move |event| {
+        tx.send(event).unwrap_or_else(|e| eprintln!("Could not send event {:?}", e));
+    }).expect("Could not listen");
+});
+
+for event in rx.iter() {
+    println!("Received {:?}", event);
+    // Process event in your application thread
+}
+```
 
 ## Sending some events
 
@@ -210,11 +230,10 @@ If the process is not granted access to the Accessibility API, the `grab` call w
 EventTapError (at least in MacOS 10.15, possibly other versions as well)
 
 #### Linux
-The `grab` function use the `evdev` library to intercept events, so they will work with both X11 and Wayland
-In order for this to work, the process runnign the `listen` or `grab` loop needs to either run as root (not recommended),
-or run as a user who's a member of the `input` group (recommended)
-Note: on some distros, the group name for evdev access is called `plugdev`, and on some systems, both groups can exist.
-When in doubt, add your user to both groups if they exist.
+The `grab` function uses the `evdev` library to intercept events, working with both X11 and Wayland.
+- Process needs to run as root (not recommended), OR
+- Run as a user who's a member of the `input` group (recommended)
+- Note: on some distros, the group is called `plugdev`. Add your user to both if they exist.
 
 ## Serialization
 

@@ -1,34 +1,37 @@
-use crate::rdev::{Button, EventType, RawKey, SimulateError};
-use crate::keycodes::windows::{get_win_codes, scancode_from_key};
-use crate::windows::common::WHEEL_DELTA;
 use crate::Key;
+use crate::keycodes::windows::{get_win_codes, scancode_from_key};
+use crate::rdev::{Button, EventType, RawKey, SimulateError};
+use crate::windows::common::WHEEL_DELTA;
 use std::mem::size_of;
 use std::ptr::null_mut;
+/// Not defined in win32 but define here for clarity
+#[allow(dead_code)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use winapi::ctypes::c_int;
 use winapi::shared::minwindef::{DWORD, HKL, LOWORD, UINT, WORD};
 use winapi::shared::ntdef::LONG;
 use winapi::um::winuser::{
-    GetForegroundWindow, GetKeyboardLayout, GetSystemMetrics, GetWindowThreadProcessId, INPUT_u,
-    MapVirtualKeyExW, SendInput, VkKeyScanExW, INPUT, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT,
-    KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, KEYEVENTF_UNICODE, MAPVK_VK_TO_VSC,
-    MAPVK_VSC_TO_VK_EX, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN,
-    MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE,
-    MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL,
-    MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
+    GetForegroundWindow, GetKeyboardLayout, GetSystemMetrics, GetWindowThreadProcessId, INPUT,
+    INPUT_KEYBOARD, INPUT_MOUSE, INPUT_u, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
+    KEYEVENTF_SCANCODE, KEYEVENTF_UNICODE, MAPVK_VK_TO_VSC, MAPVK_VSC_TO_VK_EX,
+    MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
+    MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN,
+    MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN,
+    MOUSEEVENTF_XUP, MOUSEINPUT, MapVirtualKeyExW, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
+    SendInput, VkKeyScanExW,
 };
-/// Not defined in win32 but define here for clarity
-#[allow(dead_code)]
+
 static KEYEVENTF_KEYDOWN: DWORD = 0;
 // KEYBDINPUT
-static mut DW_MOUSE_EXTRA_INFO: usize = 0;
-static mut DW_KEYBOARD_EXTRA_INFO: usize = 0;
+static DW_MOUSE_EXTRA_INFO: AtomicUsize = AtomicUsize::new(0);
+static DW_KEYBOARD_EXTRA_INFO: AtomicUsize = AtomicUsize::new(0);
 
 pub fn set_mouse_extra_info(extra: usize) {
-    unsafe { DW_MOUSE_EXTRA_INFO = extra }
+    DW_MOUSE_EXTRA_INFO.store(extra, Ordering::Relaxed);
 }
 
 pub fn set_keyboard_extra_info(extra: usize) {
-    unsafe { DW_KEYBOARD_EXTRA_INFO = extra }
+    DW_KEYBOARD_EXTRA_INFO.store(extra, Ordering::Relaxed);
 }
 
 fn sim_mouse_event(flags: DWORD, data: DWORD, dx: LONG, dy: LONG) -> Result<(), SimulateError> {
@@ -41,7 +44,7 @@ fn sim_mouse_event(flags: DWORD, data: DWORD, dx: LONG, dy: LONG) -> Result<(), 
             mouseData: data,
             dwFlags: flags,
             time: 0,
-            dwExtraInfo: DW_MOUSE_EXTRA_INFO,
+            dwExtraInfo: DW_MOUSE_EXTRA_INFO.load(Ordering::Relaxed),
         };
     }
     let mut input = [INPUT {
@@ -71,7 +74,7 @@ fn sim_keyboard_event(flags: DWORD, vk: WORD, scan: WORD) -> Result<(), Simulate
             wScan: scan,
             dwFlags: flags,
             time: 0,
-            dwExtraInfo: DW_KEYBOARD_EXTRA_INFO,
+            dwExtraInfo: DW_KEYBOARD_EXTRA_INFO.load(Ordering::Relaxed),
         };
     }
     let mut input = [INPUT {
@@ -158,23 +161,13 @@ pub fn simulate(event_type: &EventType) -> Result<(), SimulateError> {
             if *delta_x != 0.0 {
                 // Convert fractional line units back to raw WHEEL_DELTA units
                 let raw_delta = (*delta_x * (WHEEL_DELTA as f64)).round() as i32;
-                sim_mouse_event(
-                    MOUSEEVENTF_HWHEEL,
-                    raw_delta as u32,
-                    0,
-                    0,
-                )?;
+                sim_mouse_event(MOUSEEVENTF_HWHEEL, raw_delta as u32, 0, 0)?;
             }
 
             if *delta_y != 0.0 {
                 // Convert fractional line units back to raw WHEEL_DELTA units
                 let raw_delta = (*delta_y * (WHEEL_DELTA as f64)).round() as i32;
-                sim_mouse_event(
-                    MOUSEEVENTF_WHEEL,
-                    raw_delta as u32,
-                    0,
-                    0,
-                )?;
+                sim_mouse_event(MOUSEEVENTF_WHEEL, raw_delta as u32, 0, 0)?;
             }
             Ok(())
         }

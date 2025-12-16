@@ -324,11 +324,11 @@ pub enum EventType {
     /// `delta_y` represents vertical scroll and `delta_x` represents horizontal scroll.
     /// Positive values correspond to scrolling up or right and negative values
     /// correspond to scrolling down or left.
-    /// 
+    ///
     /// Values are expressed as fractions of a "line" (typically 1.0 = one line scroll).
     /// On Windows, raw touchpad/high-resolution scroll values are preserved as fractions.
     /// For example, a value of 0.25 means 1/4 of a line was scrolled.
-    /// 
+    ///
     /// Note: Linux does not support horizontal scroll. When simulating scroll on Linux,
     /// only the sign of delta_y is considered, and not the magnitude to determine wheelup or wheeldown.
     Wheel {
@@ -339,7 +339,6 @@ pub enum EventType {
     // Raw events:
     // These cannot be blocked by any user-mode application.
     // Windows: Raw Input API, macOS: CGEventTap at HID level
-
     /// Raw mouse movement with relative deltas
     /// This is the hardware signal, unaffected by mouse acceleration or DPI settings.
     MouseMoveRaw {
@@ -394,6 +393,11 @@ pub struct Event {
     pub extra_data: winapi::shared::basetsd::ULONG_PTR,
     #[cfg(target_os = "macos")]
     pub extra_data: i64,
+    /// True if this event was programmatically generated (synthetic/injected),
+    /// false if it came from actual hardware input.
+    /// On macOS: detected via CGEventSourceStateID != HIDSystemState
+    /// On Windows: detected via LLKHF_INJECTED/LLMHF_INJECTED flags
+    pub is_synthetic: bool,
 }
 
 /// We can define a dummy Keyboard, that we will use to detect

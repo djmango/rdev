@@ -1,5 +1,5 @@
 use crate::rdev::{EventType, Key, KeyboardState, UnicodeInfo};
-use crate::windows::common::{get_code, get_scan_code, FALSE, TRUE};
+use crate::windows::common::{FALSE, TRUE, get_code, get_scan_code};
 use std::collections::HashMap;
 use std::ptr::null_mut;
 use winapi::ctypes::c_int;
@@ -108,217 +108,228 @@ impl Keyboard {
         self.event_popup = b;
     }
 
-    pub(crate) unsafe fn get_unicode(&mut self, lpdata: LPARAM) -> Option<UnicodeInfo> { unsafe {
-        // https://gist.github.com/akimsko/2011327
-        // https://www.experts-exchange.com/questions/23453780/LowLevel-Keystroke-Hook-removes-Accents-on-French-Keyboard.html
-        let code = get_code(lpdata);
-        let scan_code = get_scan_code(lpdata);
+    pub(crate) unsafe fn get_unicode(&mut self, lpdata: LPARAM) -> Option<UnicodeInfo> {
+        unsafe {
+            // https://gist.github.com/akimsko/2011327
+            // https://www.experts-exchange.com/questions/23453780/LowLevel-Keystroke-Hook-removes-Accents-on-French-Keyboard.html
+            let code = get_code(lpdata);
+            let scan_code = get_scan_code(lpdata);
 
-        self.set_global_state()?;
-        self.get_code_name_unicode(code, scan_code)
-    }}
+            self.set_global_state()?;
+            self.get_code_name_unicode(code, scan_code)
+        }
+    }
 
-    pub(crate) unsafe fn set_global_state(&mut self) -> Option<()> { unsafe {
-        let mut state = [0_u8; 256];
-        let state_ptr = state.as_mut_ptr();
+    pub(crate) unsafe fn set_global_state(&mut self) -> Option<()> {
+        unsafe {
+            let mut state = [0_u8; 256];
+            let state_ptr = state.as_mut_ptr();
 
-        // to-do
-        // GetKeyState should be called before GetKeyboardState.
-        // https://stackoverflow.com/questions/45719020/winapi-getkeyboardstate-behavior-modified-by-getkeystate-when-application-is-out
-        // But this causing accents errors. Typing ö turns out ô.
-        // https://github.com/rustdesk/rustdesk/issues/2670
-        let _shift = GetKeyState(VK_SHIFT);
-        let current_window_thread_id = GetWindowThreadProcessId(GetForegroundWindow(), null_mut());
-        let thread_id = GetCurrentThreadId();
-        // Attach to active thread so we can get that keyboard state
-        let status = if winuser::AttachThreadInput(thread_id, current_window_thread_id, TRUE) == 1 {
-            // Current state of the modifiers in keyboard
-            let status = GetKeyboardState(state_ptr);
-            // Detach
-            winuser::AttachThreadInput(thread_id, current_window_thread_id, FALSE);
-            status
-        } else {
-            // Could not attach, perhaps it is this process?
-            GetKeyboardState(state_ptr)
-        };
+            // to-do
+            // GetKeyState should be called before GetKeyboardState.
+            // https://stackoverflow.com/questions/45719020/winapi-getkeyboardstate-behavior-modified-by-getkeystate-when-application-is-out
+            // But this causing accents errors. Typing ö turns out ô.
+            // https://github.com/rustdesk/rustdesk/issues/2670
+            let _shift = GetKeyState(VK_SHIFT);
+            let current_window_thread_id =
+                GetWindowThreadProcessId(GetForegroundWindow(), null_mut());
+            let thread_id = GetCurrentThreadId();
+            // Attach to active thread so we can get that keyboard state
+            let status =
+                if winuser::AttachThreadInput(thread_id, current_window_thread_id, TRUE) == 1 {
+                    // Current state of the modifiers in keyboard
+                    let status = GetKeyboardState(state_ptr);
+                    // Detach
+                    winuser::AttachThreadInput(thread_id, current_window_thread_id, FALSE);
+                    status
+                } else {
+                    // Could not attach, perhaps it is this process?
+                    GetKeyboardState(state_ptr)
+                };
 
-        if status != 1 {
-            return None;
-        }
+            if status != 1 {
+                return None;
+            }
 
-        let press_state = 129;
-        // let release_state = 0;
-        let control_left = self.get_modifier(Key::ControlLeft);
-        let control_right = self.get_modifier(Key::ControlRight);
-        if control_left {
-            state[VK_LCONTROL as usize] = press_state;
-        }
-        if control_right {
-            state[VK_RCONTROL as usize] = press_state;
-        }
-        if control_left || control_right {
-            state[VK_CONTROL as usize] = press_state;
-        }
-        // state[VK_LCONTROL as usize] = if control_left {press_state} else {release_state};
-        // state[VK_RCONTROL as usize] = if control_right {press_state} else {release_state};
-        // state[VK_CONTROL as usize] = if control_left || control_right {press_state} else {release_state};
+            let press_state = 129;
+            // let release_state = 0;
+            let control_left = self.get_modifier(Key::ControlLeft);
+            let control_right = self.get_modifier(Key::ControlRight);
+            if control_left {
+                state[VK_LCONTROL as usize] = press_state;
+            }
+            if control_right {
+                state[VK_RCONTROL as usize] = press_state;
+            }
+            if control_left || control_right {
+                state[VK_CONTROL as usize] = press_state;
+            }
+            // state[VK_LCONTROL as usize] = if control_left {press_state} else {release_state};
+            // state[VK_RCONTROL as usize] = if control_right {press_state} else {release_state};
+            // state[VK_CONTROL as usize] = if control_left || control_right {press_state} else {release_state};
 
-        let shift_left = self.get_modifier(Key::ShiftLeft);
-        let shift_right = self.get_modifier(Key::ShiftRight);
-        if shift_left {
-            state[VK_LSHIFT as usize] = press_state;
-        }
-        if shift_right {
-            state[VK_RSHIFT as usize] = press_state;
-        }
-        if shift_left || shift_right {
-            state[VK_SHIFT as usize] = press_state;
-        }
-        // state[VK_LSHIFT as usize] = if shift_left {press_state} else {release_state};
-        // state[VK_RSHIFT as usize] = if shift_right {press_state} else {release_state};
-        // state[VK_SHIFT as usize] = if shift_left || shift_right {press_state} else {release_state};
+            let shift_left = self.get_modifier(Key::ShiftLeft);
+            let shift_right = self.get_modifier(Key::ShiftRight);
+            if shift_left {
+                state[VK_LSHIFT as usize] = press_state;
+            }
+            if shift_right {
+                state[VK_RSHIFT as usize] = press_state;
+            }
+            if shift_left || shift_right {
+                state[VK_SHIFT as usize] = press_state;
+            }
+            // state[VK_LSHIFT as usize] = if shift_left {press_state} else {release_state};
+            // state[VK_RSHIFT as usize] = if shift_right {press_state} else {release_state};
+            // state[VK_SHIFT as usize] = if shift_left || shift_right {press_state} else {release_state};
 
-        let alt_left = self.get_modifier(Key::Alt);
-        let alt_right = self.get_modifier(Key::AltGr);
-        if alt_left {
-            state[VK_LMENU as usize] = press_state;
-        }
-        if alt_right {
-            state[VK_RMENU as usize] = press_state;
-        }
-        if alt_left || alt_right {
-            state[VK_MENU as usize] = press_state;
-        }
-        // state[VK_LMENU as usize] = if alt_left {press_state} else {release_state};
-        // state[VK_RMENU as usize] = if alt_right {press_state} else {release_state};
-        // state[VK_MENU as usize] = if alt_left || alt_right {press_state} else {release_state};
+            let alt_left = self.get_modifier(Key::Alt);
+            let alt_right = self.get_modifier(Key::AltGr);
+            if alt_left {
+                state[VK_LMENU as usize] = press_state;
+            }
+            if alt_right {
+                state[VK_RMENU as usize] = press_state;
+            }
+            if alt_left || alt_right {
+                state[VK_MENU as usize] = press_state;
+            }
+            // state[VK_LMENU as usize] = if alt_left {press_state} else {release_state};
+            // state[VK_RMENU as usize] = if alt_right {press_state} else {release_state};
+            // state[VK_MENU as usize] = if alt_left || alt_right {press_state} else {release_state};
 
-        let win_left = self.get_modifier(Key::MetaLeft);
-        let win_right = self.get_modifier(Key::MetaRight);
-        if win_left {
-            state[VK_LWIN as usize] = press_state;
-        }
-        if win_right {
-            state[VK_RWIN as usize] = press_state;
-        }
-        // state[VK_LWIN as usize] = if win_left {press_state} else {release_state};
-        // state[VK_RWIN as usize] = if win_right {press_state} else {release_state};
+            let win_left = self.get_modifier(Key::MetaLeft);
+            let win_right = self.get_modifier(Key::MetaRight);
+            if win_left {
+                state[VK_LWIN as usize] = press_state;
+            }
+            if win_right {
+                state[VK_RWIN as usize] = press_state;
+            }
+            // state[VK_LWIN as usize] = if win_left {press_state} else {release_state};
+            // state[VK_RWIN as usize] = if win_right {press_state} else {release_state};
 
-        self.last_state = state;
-        Some(())
-    }}
+            self.last_state = state;
+            Some(())
+        }
+    }
 
     pub(crate) unsafe fn get_code_name_unicode(
         &mut self,
         code: UINT,
         scan_code: UINT,
-    ) -> Option<UnicodeInfo> { unsafe {
-        let current_window_thread_id = GetWindowThreadProcessId(GetForegroundWindow(), null_mut());
-        let state_ptr = self.last_state.as_mut_ptr();
-        const BUF_LEN: i32 = 32;
-        let mut buff = [0_u16; BUF_LEN as usize];
-        let buff_ptr = buff.as_mut_ptr();
-        let layout = GetKeyboardLayout(current_window_thread_id);
-        // https://github.com/rustdesk/rustdesk/issues/2670
-        // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-tounicodeex
-        // For Portuguese (Brazil) layout,
-        // Shift + [ returns -1. (`)
-        // Shift + ' returns -1. (^)
-        // Shift + 6 does not return -1(dead code)(¨).
-        let len = ToUnicodeEx(code, scan_code, state_ptr, buff_ptr, 8 - 1, 0, layout);
-        let mut is_dead = false;
-        let result = match len {
-            0 => None,
-            -1 => {
-                is_dead = true;
-                self.clear_keyboard_buffer(code, scan_code, layout);
-                Some(UnicodeInfo {
-                    name: None,
-                    unicode: Vec::new(),
-                    is_dead: true,
-                })
-            }
-            len if len > 0 => {
-                let unicode = buff[..len as usize].to_vec();
-                Some(UnicodeInfo {
-                    name: String::from_utf16(&unicode).ok(),
-                    unicode,
-                    is_dead: false,
-                })
-            }
-            _ => None,
-        };
+    ) -> Option<UnicodeInfo> {
+        unsafe {
+            let current_window_thread_id =
+                GetWindowThreadProcessId(GetForegroundWindow(), null_mut());
+            let state_ptr = self.last_state.as_mut_ptr();
+            const BUF_LEN: i32 = 32;
+            let mut buff = [0_u16; BUF_LEN as usize];
+            let buff_ptr = buff.as_mut_ptr();
+            let layout = GetKeyboardLayout(current_window_thread_id);
+            // https://github.com/rustdesk/rustdesk/issues/2670
+            // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-tounicodeex
+            // For Portuguese (Brazil) layout,
+            // Shift + [ returns -1. (`)
+            // Shift + ' returns -1. (^)
+            // Shift + 6 does not return -1(dead code)(¨).
+            let len = ToUnicodeEx(code, scan_code, state_ptr, buff_ptr, 8 - 1, 0, layout);
+            let mut is_dead = false;
+            let result = match len {
+                0 => None,
+                -1 => {
+                    is_dead = true;
+                    self.clear_keyboard_buffer(code, scan_code, layout);
+                    Some(UnicodeInfo {
+                        name: None,
+                        unicode: Vec::new(),
+                        is_dead: true,
+                    })
+                }
+                len if len > 0 => {
+                    let unicode = buff[..len as usize].to_vec();
+                    Some(UnicodeInfo {
+                        name: String::from_utf16(&unicode).ok(),
+                        unicode,
+                        is_dead: false,
+                    })
+                }
+                _ => None,
+            };
 
-        if self.event_popup {
-            if self.last_code != 0 && self.last_is_dead {
-                buff = [0; 32];
-                let buff_ptr = buff.as_mut_ptr();
-                let last_state_ptr = self.last_state.as_mut_ptr();
-                ToUnicodeEx(
-                    self.last_code,
-                    self.last_scan_code,
-                    last_state_ptr,
-                    buff_ptr,
-                    BUF_LEN,
-                    0,
-                    layout,
-                );
-                self.last_code = 0;
+            if self.event_popup {
+                if self.last_code != 0 && self.last_is_dead {
+                    buff = [0; 32];
+                    let buff_ptr = buff.as_mut_ptr();
+                    let last_state_ptr = self.last_state.as_mut_ptr();
+                    ToUnicodeEx(
+                        self.last_code,
+                        self.last_scan_code,
+                        last_state_ptr,
+                        buff_ptr,
+                        BUF_LEN,
+                        0,
+                        layout,
+                    );
+                    self.last_code = 0;
+                } else {
+                    self.last_code = code;
+                    self.last_scan_code = scan_code;
+                }
             } else {
-                self.last_code = code;
-                self.last_scan_code = scan_code;
+                // I cannot understand why ToUnicodeEx is called.
+                // But ToUnicodeEx is needed here.
+                if is_dead {
+                    buff = [0; 32];
+                    let buff_ptr = buff.as_mut_ptr();
+                    let last_state_ptr = self.last_state.as_mut_ptr();
+                    ToUnicodeEx(
+                        code,
+                        scan_code,
+                        last_state_ptr,
+                        buff_ptr,
+                        BUF_LEN,
+                        0,
+                        layout,
+                    );
+                    self.last_code = 0;
+                } else {
+                    self.last_code = code;
+                    self.last_scan_code = scan_code;
+                }
             }
-        } else {
-            // I cannot understand why ToUnicodeEx is called.
-            // But ToUnicodeEx is needed here.
-            if is_dead {
-                buff = [0; 32];
-                let buff_ptr = buff.as_mut_ptr();
-                let last_state_ptr = self.last_state.as_mut_ptr();
-                ToUnicodeEx(
-                    code,
-                    scan_code,
-                    last_state_ptr,
-                    buff_ptr,
-                    BUF_LEN,
-                    0,
-                    layout,
-                );
-                self.last_code = 0;
-            } else {
-                self.last_code = code;
-                self.last_scan_code = scan_code;
+            self.last_is_dead = is_dead;
+
+            // C0 controls
+            if len == 1
+                && matches!(
+                    String::from_utf16(&buff[..len as usize])
+                        .ok()?
+                        .chars()
+                        .next()?,
+                    '\u{1}'..='\u{1f}'
+                )
+            {
+                return None;
+            }
+            result
+        }
+    }
+
+    unsafe fn clear_keyboard_buffer(&self, code: UINT, scan_code: UINT, layout: HKL) {
+        unsafe {
+            const BUF_LEN: i32 = 32;
+            let mut buff = [0_u16; BUF_LEN as usize];
+            let buff_ptr = buff.as_mut_ptr();
+            let mut state = [0_u8; 256];
+            let state_ptr = state.as_mut_ptr();
+
+            let mut len = -1;
+            while len < 0 {
+                len = ToUnicodeEx(code, scan_code, state_ptr, buff_ptr, BUF_LEN, 0, layout);
             }
         }
-        self.last_is_dead = is_dead;
-
-        // C0 controls
-        if len == 1
-            && matches!(
-                String::from_utf16(&buff[..len as usize])
-                    .ok()?
-                    .chars()
-                    .next()?,
-                '\u{1}'..='\u{1f}'
-            )
-        {
-            return None;
-        }
-        result
-    }}
-
-    unsafe fn clear_keyboard_buffer(&self, code: UINT, scan_code: UINT, layout: HKL) { unsafe {
-        const BUF_LEN: i32 = 32;
-        let mut buff = [0_u16; BUF_LEN as usize];
-        let buff_ptr = buff.as_mut_ptr();
-        let mut state = [0_u8; 256];
-        let state_ptr = state.as_mut_ptr();
-
-        let mut len = -1;
-        while len < 0 {
-            len = ToUnicodeEx(code, scan_code, state_ptr, buff_ptr, BUF_LEN, 0, layout);
-        }
-    }}
+    }
 
     pub fn is_dead(&mut self) -> bool {
         self.last_is_dead

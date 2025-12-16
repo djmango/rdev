@@ -1,4 +1,4 @@
-use rdev::{simulate, EventType, Key, SimulateError};
+use rdev::{EventType, Key, SimulateError, simulate};
 use std::{thread, time};
 
 fn send(event_type: &EventType) {

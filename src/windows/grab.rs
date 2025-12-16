@@ -1,8 +1,14 @@
 use crate::{
     rdev::{Event, EventType, GrabError},
-    windows::common::{convert, get_scan_code, HookError, KEYBOARD},
+    windows::common::{
+        HookError, KEYBOARD, convert, get_scan_code, is_keyboard_injected, is_mouse_injected,
+    },
 };
-use std::{io::Error, ptr::null_mut, sync::Mutex, time::SystemTime};
+use parking_lot::Mutex;
+use std::sync::{LazyLock, OnceLock};
+use std::{io::Error, ptr::null_mut, time::SystemTime};
+
+type GrabCallbackType = Mutex<Box<dyn FnMut(Event) -> Option<Event> + Send>>;
 use winapi::{
     shared::{
         basetsd::ULONG_PTR,
@@ -14,30 +20,29 @@ use winapi::{
         errhandlingapi::GetLastError,
         processthreadsapi::GetCurrentThreadId,
         winuser::{
-            CallNextHookEx, DispatchMessageA, GetMessageA, PostThreadMessageA, SetWindowsHookExA,
-            TranslateMessage, UnhookWindowsHookEx, HC_ACTION, MSG, PKBDLLHOOKSTRUCT,
-            PMOUSEHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_USER,
+            CallNextHookEx, DispatchMessageA, GetMessageA, HC_ACTION, MSG, PKBDLLHOOKSTRUCT,
+            PMOUSEHOOKSTRUCT, PostThreadMessageA, SetWindowsHookExA, TranslateMessage,
+            UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_USER,
         },
     },
 };
 
-static mut GLOBAL_CALLBACK: Option<Box<dyn FnMut(Event) -> Option<Event>>> = None;
-static mut GET_KEY_UNICODE: bool = true;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-lazy_static::lazy_static! {
-    static ref CUR_HOOK_THREAD_ID: Mutex<DWORD> = Mutex::new(0);
-}
+static GLOBAL_CALLBACK: OnceLock<Mutex<Box<dyn FnMut(Event) -> Option<Event> + Send>>> =
+    OnceLock::new();
+static GET_KEY_UNICODE: AtomicBool = AtomicBool::new(true);
+
+static CUR_HOOK_THREAD_ID: LazyLock<Mutex<DWORD>> = LazyLock::new(|| Mutex::new(0));
 
 const WM_USER_EXIT_HOOK: u32 = WM_USER + 1;
 
 pub fn set_get_key_unicode(b: bool) {
-    unsafe {
-        GET_KEY_UNICODE = b;
-    }
+    GET_KEY_UNICODE.store(b, Ordering::Relaxed);
 }
 
 pub fn set_event_popup(b: bool) {
-    KEYBOARD.lock().unwrap().set_event_popup(b);
+    KEYBOARD.lock().set_event_popup(b);
 }
 
 unsafe fn raw_callback(
@@ -45,55 +50,73 @@ unsafe fn raw_callback(
     param: usize,
     lpdata: isize,
     f_get_extra_data: impl FnOnce(isize) -> ULONG_PTR,
-) -> isize { unsafe {
-    if code == HC_ACTION {
-        let (opt, code) = convert(param, lpdata);
-        if let Some(event_type) = opt {
-            let unicode = if GET_KEY_UNICODE {
-                match &event_type {
-                    EventType::KeyPress(_key) => match (*KEYBOARD).lock() {
-                        Ok(mut keyboard) => keyboard.get_unicode(lpdata),
-                        Err(_) => None,
-                    },
-                    _ => None,
+    f_is_injected: impl FnOnce(isize) -> bool,
+) -> isize {
+    unsafe {
+        if code == HC_ACTION {
+            let (opt, code) = convert(param, lpdata);
+            if let Some(event_type) = opt {
+                let unicode = if GET_KEY_UNICODE.load(Ordering::Relaxed) {
+                    match &event_type {
+                        EventType::KeyPress(_key) => {
+                            let mut keyboard = KEYBOARD.lock();
+                            keyboard.get_unicode(lpdata)
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                let event = Event {
+                    event_type,
+                    time: SystemTime::now(),
+                    unicode,
+                    platform_code: code as _,
+                    position_code: get_scan_code(lpdata),
+                    usb_hid: 0,
+                    extra_data: f_get_extra_data(lpdata),
+                    is_synthetic: f_is_injected(lpdata),
+                };
+
+                if let Some(callback_mutex) = GLOBAL_CALLBACK.get() {
+                    let mut callback = callback_mutex.lock();
+                    if callback(event).is_none() {
+                        // https://stackoverflow.com/questions/42756284/blocking-windows-mouse-click-using-setwindowshookex
+                        // https://android.developreference.com/article/14560004/Blocking+windows+mouse+click+using+SetWindowsHookEx()
+                        // https://cboard.cprogramming.com/windows-programming/99678-setwindowshookex-wm_keyboard_ll.html
+                        // let _result = CallNextHookEx(hhk, code, param, lpdata);
+                        return 1;
+                    }
                 }
-            } else {
-                None
-            };
-            let event = Event {
-                event_type,
-                time: SystemTime::now(),
-                unicode,
-                platform_code: code as _,
-                position_code: get_scan_code(lpdata),
-                usb_hid: 0,
-                extra_data: f_get_extra_data(lpdata),
-            };
-            let ptr = &raw mut GLOBAL_CALLBACK;
-            if let Some(callback) = &mut *ptr
-                && callback(event).is_none() {
-                    // https://stackoverflow.com/questions/42756284/blocking-windows-mouse-click-using-setwindowshookex
-                    // https://android.developreference.com/article/14560004/Blocking+windows+mouse+click+using+SetWindowsHookEx()
-                    // https://cboard.cprogramming.com/windows-programming/99678-setwindowshookex-wm_keyboard_ll.html
-                    // let _result = CallNextHookEx(hhk, code, param, lpdata);
-                    return 1;
-                }
+            }
         }
+        CallNextHookEx(null_mut(), code, param, lpdata)
     }
-    CallNextHookEx(null_mut(), code, param, lpdata)
-}}
+}
 
-unsafe extern "system" fn raw_callback_mouse(code: i32, param: usize, lpdata: isize) -> isize { unsafe {
-    raw_callback(code, param, lpdata, |data: isize| {
-        (*(data as PMOUSEHOOKSTRUCT)).dwExtraInfo
-    })
-}}
+unsafe extern "system" fn raw_callback_mouse(code: i32, param: usize, lpdata: isize) -> isize {
+    unsafe {
+        raw_callback(
+            code,
+            param,
+            lpdata,
+            |data: isize| (*(data as PMOUSEHOOKSTRUCT)).dwExtraInfo,
+            |data: isize| is_mouse_injected(data),
+        )
+    }
+}
 
-unsafe extern "system" fn raw_callback_keyboard(code: i32, param: usize, lpdata: isize) -> isize { unsafe {
-    raw_callback(code, param, lpdata, |data: isize| {
-        (*(data as PKBDLLHOOKSTRUCT)).dwExtraInfo
-    })
-}}
+unsafe extern "system" fn raw_callback_keyboard(code: i32, param: usize, lpdata: isize) -> isize {
+    unsafe {
+        raw_callback(
+            code,
+            param,
+            lpdata,
+            |data: isize| (*(data as PKBDLLHOOKSTRUCT)).dwExtraInfo,
+            |data: isize| is_keyboard_injected(data),
+        )
+    }
+}
 
 impl From<HookError> for GrabError {
     fn from(error: HookError) -> Self {
@@ -106,9 +129,9 @@ impl From<HookError> for GrabError {
 
 fn do_hook<T>(callback: T) -> Result<(HHOOK, HHOOK), GrabError>
 where
-    T: FnMut(Event) -> Option<Event> + 'static,
+    T: FnMut(Event) -> Option<Event> + Send + 'static,
 {
-    let mut cur_hook_thread_id = CUR_HOOK_THREAD_ID.lock().unwrap();
+    let mut cur_hook_thread_id = CUR_HOOK_THREAD_ID.lock();
     if *cur_hook_thread_id != 0 {
         // already hooked
         return Ok((null_mut(), null_mut()));
@@ -116,8 +139,13 @@ where
 
     let hook_keyboard;
     let mut hook_mouse = null_mut();
+
+    // Initialize callback in OnceLock
+    if GLOBAL_CALLBACK.set(Mutex::new(Box::new(callback))).is_err() {
+        log::warn!("do_hook() called multiple times, ignoring previous callback");
+    }
+
     unsafe {
-        GLOBAL_CALLBACK = Some(Box::new(callback));
         hook_keyboard =
             SetWindowsHookExA(WH_KEYBOARD_LL, Some(raw_callback_keyboard), null_mut(), 0);
         if hook_keyboard.is_null() {
@@ -142,12 +170,12 @@ where
 
 #[inline]
 pub fn is_grabbed() -> bool {
-    *CUR_HOOK_THREAD_ID.lock().unwrap() != 0
+    *CUR_HOOK_THREAD_ID.lock() != 0
 }
 
 pub fn grab<T>(callback: T) -> Result<(), GrabError>
 where
-    T: FnMut(Event) -> Option<Event> + 'static,
+    T: FnMut(Event) -> Option<Event> + Send + 'static,
 {
     if is_grabbed() {
         return Ok(());
@@ -183,15 +211,14 @@ where
                     hook_keyboard = null_mut();
                 }
 
-                if !hook_mouse.is_null()
-                    && FALSE == UnhookWindowsHookEx(hook_mouse as _) {
-                        log::error!(
-                            "Failed UnhookWindowsHookEx mouse {}",
-                            Error::last_os_error()
-                        );
-                        continue;
-                    }
-                    // hook_mouse = null_mut();
+                if !hook_mouse.is_null() && FALSE == UnhookWindowsHookEx(hook_mouse as _) {
+                    log::error!(
+                        "Failed UnhookWindowsHookEx mouse {}",
+                        Error::last_os_error()
+                    );
+                    continue;
+                }
+                // hook_mouse = null_mut();
                 break;
             }
 
@@ -199,21 +226,22 @@ where
             DispatchMessageA(&msg);
         }
 
-        *CUR_HOOK_THREAD_ID.lock().unwrap() = 0;
+        *CUR_HOOK_THREAD_ID.lock() = 0;
     }
     Ok(())
 }
 
 pub fn exit_grab() -> Result<(), GrabError> {
     unsafe {
-        let mut cur_hook_thread_id = CUR_HOOK_THREAD_ID.lock().unwrap();
+        let mut cur_hook_thread_id = CUR_HOOK_THREAD_ID.lock();
         if *cur_hook_thread_id != 0
-            && FALSE == PostThreadMessageA(*cur_hook_thread_id, WM_USER_EXIT_HOOK, 0, 0) {
-                return Err(GrabError::ExitGrabError(format!(
-                    "Failed to post message to exit hook, {}",
-                    GetLastError()
-                )));
-            }
+            && FALSE == PostThreadMessageA(*cur_hook_thread_id, WM_USER_EXIT_HOOK, 0, 0)
+        {
+            return Err(GrabError::ExitGrabError(format!(
+                "Failed to post message to exit hook, {}",
+                GetLastError()
+            )));
+        }
         *cur_hook_thread_id = 0;
     }
     Ok(())

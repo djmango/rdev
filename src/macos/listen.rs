@@ -7,10 +7,14 @@ use objc2_core_graphics::{
     CGEventTapProxy, CGEventType, kCGEventMaskForAllEvents,
 };
 use objc2_foundation::NSAutoreleasePool;
+use parking_lot::Mutex;
 use std::os::raw::c_void;
-use std::ptr::{null_mut, NonNull};
+use std::ptr::{NonNull, null_mut};
+use std::sync::OnceLock;
 
-static mut GLOBAL_CALLBACK: Option<Box<dyn FnMut(Event)>> = None;
+type ListenCallbackType = Mutex<Box<dyn FnMut(Event) + Send>>;
+
+static GLOBAL_CALLBACK: OnceLock<ListenCallbackType> = OnceLock::new();
 
 #[link(name = "Cocoa", kind = "framework")]
 unsafe extern "C" {}
@@ -21,26 +25,26 @@ unsafe extern "C-unwind" fn raw_callback(
     cg_event: NonNull<CGEvent>,
     _user_info: *mut c_void,
 ) -> *mut CGEvent {
-    let opt = KEYBOARD_STATE.lock();
-    if let Ok(mut guard) = opt
-        && let Some(keyboard) = guard.as_mut() {
-            unsafe {
-                let events = convert(_type, cg_event, keyboard);
-                // Reborrowing the global callback pointer.
-                let ptr = &raw mut GLOBAL_CALLBACK;
-                if let Some(callback) = &mut *ptr {
-                    for event in events {
-                        callback(event);
-                    }
+    // parking_lot::Mutex never poisons, so we can safely lock
+    let mut guard = KEYBOARD_STATE.lock();
+    if let Some(keyboard) = guard.as_mut() {
+        unsafe {
+            let events = convert(_type, cg_event, keyboard);
+            // Get callback from OnceLock and lock it
+            if let Some(callback_mutex) = GLOBAL_CALLBACK.get() {
+                let mut callback = callback_mutex.lock();
+                for event in events {
+                    callback(event);
                 }
             }
         }
+    }
     cg_event.as_ptr()
 }
 
 pub fn listen<T>(callback: T) -> Result<(), ListenError>
 where
-    T: FnMut(Event) + 'static,
+    T: FnMut(Event) + Send + 'static,
 {
     // Compute event mask based on keyboard_only setting
     let event_mask: u64 = if crate::keyboard_only() {
@@ -51,8 +55,13 @@ where
         kCGEventMaskForAllEvents.into()
     };
 
+    // Initialize callback in OnceLock
+    // If already set, this returns Err, meaning listen was called multiple times
+    if GLOBAL_CALLBACK.set(Mutex::new(Box::new(callback))).is_err() {
+        log::warn!("listen() called multiple times, ignoring previous callback");
+    }
+
     unsafe {
-        GLOBAL_CALLBACK = Some(Box::new(callback));
         let _pool = NSAutoreleasePool::new();
         let tap_callback: CGEventTapCallBack = Some(raw_callback);
         let tap = CGEvent::tap_create(

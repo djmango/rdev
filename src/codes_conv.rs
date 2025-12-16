@@ -8,13 +8,13 @@ use crate::keycodes::windows::key_from_scancode as win_key_from_scancode;
 #[cfg(target_os = "macos")]
 use crate::macos::map_keycode;
 use crate::{
+    Key, KeyCode,
     keycodes::{
         android::code_from_key as android_code_from_key,
         linux::code_from_key as linux_code_from_key, macos::code_from_key as macos_code_from_key,
         usb_hid::key_from_code as usb_hid_key_from_code,
         windows::scancode_from_key as win_scancode_from_key,
     },
-    Key, KeyCode,
 };
 
 macro_rules! conv_keycodes {

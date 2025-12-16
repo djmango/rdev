@@ -2,11 +2,15 @@
 use crate::keycodes::macos::virtual_keycodes::*;
 use crate::macos::keyboard::Keyboard;
 use crate::rdev::{Button, Event, EventType, Key};
-use lazy_static::lazy_static;
-use objc2_core_graphics::{CGEvent, CGEventField, CGEventFlags, CGEventType, CGKeyCode};
+use objc2_core_graphics::{
+    CGEvent, CGEventField, CGEventFlags, CGEventSource, CGEventSourceStateID, CGEventType,
+    CGKeyCode,
+};
+use parking_lot::Mutex;
 use std::convert::TryInto;
 use std::ptr::NonNull;
-use std::sync::Mutex;
+use std::sync::LazyLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use crate::keycodes::macos::key_from_code;
@@ -27,10 +31,13 @@ pub const kKeyboardISO: PhysicalKeyboardLayoutType = 1230196512;
 #[allow(non_upper_case_globals, dead_code)]
 pub const kKeyboardUnknown: PhysicalKeyboardLayoutType = 1061109567;
 
-lazy_static! {
-    pub static ref LAST_FLAGS: Mutex<CGEventFlags> = Mutex::new(CGEventFlags(0));
-    pub static ref KEYBOARD_STATE: Mutex<Option<Keyboard>> = Mutex::new(Keyboard::new());
-}
+// Using AtomicU64 for LAST_FLAGS since CGEventFlags is a newtype around u64
+// This eliminates mutex overhead and deadlock potential
+pub static LAST_FLAGS: AtomicU64 = AtomicU64::new(0);
+
+// Using parking_lot::Mutex which never poisons, eliminating panic potential
+pub static KEYBOARD_STATE: LazyLock<Mutex<Option<Keyboard>>> =
+    LazyLock::new(|| Mutex::new(Keyboard::new()));
 
 #[allow(improper_ctypes)]
 #[allow(non_snake_case)]
@@ -68,13 +75,6 @@ pub fn map_keycode(code: CGKeyCode) -> CGKeyCode {
     }
 }
 
-pub fn set_is_main_thread(b: bool) {
-    if let Ok(mut guard) = KEYBOARD_STATE.lock()
-        && let Some(keyboard_state) = guard.as_mut() {
-            keyboard_state.set_is_main_thread(b);
-        }
-}
-
 #[inline]
 unsafe fn get_code(cg_event: &CGEvent) -> Option<CGKeyCode> {
     CGEvent::integer_value_field(Some(cg_event), CGEventField::KeyboardEventKeycode)
@@ -94,11 +94,17 @@ pub unsafe fn convert(
         let mut events = Vec::new();
 
         // Get common event data
-        let extra_data = CGEvent::integer_value_field(
-            Some(cg_event_ref),
-            CGEventField::EventSourceUserData,
-        );
+        let extra_data =
+            CGEvent::integer_value_field(Some(cg_event_ref), CGEventField::EventSourceUserData);
         let time = SystemTime::now();
+
+        // Detect if event is synthetic (programmatically generated) by checking the source state ID.
+        // Hardware events have HIDSystemState, while synthetic events have Private or CombinedSessionState.
+        let is_synthetic = CGEvent::new_source_from_event(Some(cg_event_ref))
+            .map(|src| {
+                CGEventSource::source_state_id(Some(&src)) != CGEventSourceStateID::HIDSystemState
+            })
+            .unwrap_or(false);
 
         match _type {
             CGEventType::LeftMouseDown => {
@@ -111,6 +117,7 @@ pub unsafe fn convert(
                     position_code: 0,
                     usb_hid: 0,
                     extra_data,
+                    is_synthetic,
                 });
                 // Absolute event
                 events.push(Event {
@@ -121,6 +128,7 @@ pub unsafe fn convert(
                     position_code: 0,
                     usb_hid: 0,
                     extra_data,
+                    is_synthetic,
                 });
             }
             CGEventType::LeftMouseUp => {
@@ -132,6 +140,7 @@ pub unsafe fn convert(
                     position_code: 0,
                     usb_hid: 0,
                     extra_data,
+                    is_synthetic,
                 });
                 events.push(Event {
                     event_type: EventType::ButtonRelease(Button::Left),
@@ -141,6 +150,7 @@ pub unsafe fn convert(
                     position_code: 0,
                     usb_hid: 0,
                     extra_data,
+                    is_synthetic,
                 });
             }
             CGEventType::RightMouseDown => {
@@ -152,6 +162,7 @@ pub unsafe fn convert(
                     position_code: 0,
                     usb_hid: 0,
                     extra_data,
+                    is_synthetic,
                 });
                 events.push(Event {
                     event_type: EventType::ButtonPress(Button::Right),
@@ -161,6 +172,7 @@ pub unsafe fn convert(
                     position_code: 0,
                     usb_hid: 0,
                     extra_data,
+                    is_synthetic,
                 });
             }
             CGEventType::RightMouseUp => {
@@ -172,6 +184,7 @@ pub unsafe fn convert(
                     position_code: 0,
                     usb_hid: 0,
                     extra_data,
+                    is_synthetic,
                 });
                 events.push(Event {
                     event_type: EventType::ButtonRelease(Button::Right),
@@ -181,6 +194,7 @@ pub unsafe fn convert(
                     position_code: 0,
                     usb_hid: 0,
                     extra_data,
+                    is_synthetic,
                 });
             }
             CGEventType::OtherMouseDown => {
@@ -201,6 +215,7 @@ pub unsafe fn convert(
                     position_code: 0,
                     usb_hid: 0,
                     extra_data,
+                    is_synthetic,
                 });
                 events.push(Event {
                     event_type: EventType::ButtonPress(button),
@@ -210,6 +225,7 @@ pub unsafe fn convert(
                     position_code: 0,
                     usb_hid: 0,
                     extra_data,
+                    is_synthetic,
                 });
             }
             CGEventType::OtherMouseUp => {
@@ -230,6 +246,7 @@ pub unsafe fn convert(
                     position_code: 0,
                     usb_hid: 0,
                     extra_data,
+                    is_synthetic,
                 });
                 events.push(Event {
                     event_type: EventType::ButtonRelease(button),
@@ -239,9 +256,12 @@ pub unsafe fn convert(
                     position_code: 0,
                     usb_hid: 0,
                     extra_data,
+                    is_synthetic,
                 });
             }
-            CGEventType::MouseMoved | CGEventType::LeftMouseDragged | CGEventType::RightMouseDragged => {
+            CGEventType::MouseMoved
+            | CGEventType::LeftMouseDragged
+            | CGEventType::RightMouseDragged => {
                 // Raw deltas (unaccelerated)
                 let delta_x = CGEvent::integer_value_field(
                     Some(cg_event_ref),
@@ -260,6 +280,7 @@ pub unsafe fn convert(
                         position_code: 0,
                         usb_hid: 0,
                         extra_data,
+                        is_synthetic,
                     });
                 }
                 // Absolute position
@@ -275,6 +296,7 @@ pub unsafe fn convert(
                     position_code: 0,
                     usb_hid: 0,
                     extra_data,
+                    is_synthetic,
                 });
             }
             CGEventType::KeyDown => {
@@ -282,10 +304,8 @@ pub unsafe fn convert(
                     let key = key_from_code(code);
                     let key_code = code as u32;
                     #[allow(non_upper_case_globals)]
-                    let skip_unicode = matches!(
-                        code,
-                        kVK_Shift | kVK_RightShift | kVK_ForwardDelete
-                    );
+                    let skip_unicode =
+                        matches!(code, kVK_Shift | kVK_RightShift | kVK_ForwardDelete);
                     let unicode = if skip_unicode {
                         None
                     } else {
@@ -301,6 +321,7 @@ pub unsafe fn convert(
                         position_code: 0,
                         usb_hid: 0,
                         extra_data,
+                        is_synthetic,
                     });
                     // Regular event
                     events.push(Event {
@@ -311,6 +332,7 @@ pub unsafe fn convert(
                         position_code: 0,
                         usb_hid: 0,
                         extra_data,
+                        is_synthetic,
                     });
                 }
             }
@@ -326,6 +348,7 @@ pub unsafe fn convert(
                         position_code: 0,
                         usb_hid: 0,
                         extra_data,
+                        is_synthetic,
                     });
                     // Regular event
                     events.push(Event {
@@ -336,6 +359,7 @@ pub unsafe fn convert(
                         position_code: 0,
                         usb_hid: 0,
                         extra_data,
+                        is_synthetic,
                     });
                 }
             }
@@ -343,12 +367,17 @@ pub unsafe fn convert(
                 if let Some(code) = get_code(cg_event_ref) {
                     let key = key_from_code(code);
                     let flags = CGEvent::flags(Some(cg_event_ref));
-                    let mut global_flags = LAST_FLAGS.lock().unwrap();
-                    let (event_type, raw_event_type) = if flags < *global_flags {
-                        *global_flags = flags;
+                    let flags_u64 = flags.0;
+
+                    // Use atomic compare-and-swap to update flags without locking
+                    let last_flags_u64 = LAST_FLAGS.load(Ordering::Acquire);
+                    let last_flags = CGEventFlags(last_flags_u64);
+
+                    let (event_type, raw_event_type) = if flags < last_flags {
+                        LAST_FLAGS.store(flags_u64, Ordering::Release);
                         (EventType::KeyRelease(key), EventType::KeyReleaseRaw(key))
                     } else {
-                        *global_flags = flags;
+                        LAST_FLAGS.store(flags_u64, Ordering::Release);
                         (EventType::KeyPress(key), EventType::KeyPressRaw(key))
                     };
                     // Raw event
@@ -360,6 +389,7 @@ pub unsafe fn convert(
                         position_code: 0,
                         usb_hid: 0,
                         extra_data,
+                        is_synthetic,
                     });
                     // Regular event
                     events.push(Event {
@@ -370,6 +400,7 @@ pub unsafe fn convert(
                         position_code: 0,
                         usb_hid: 0,
                         extra_data,
+                        is_synthetic,
                     });
                 }
             }
@@ -394,6 +425,7 @@ pub unsafe fn convert(
                     position_code: 0,
                     usb_hid: 0,
                     extra_data,
+                    is_synthetic,
                 });
                 // Absolute wheel event (for compatibility)
                 events.push(Event {
@@ -407,6 +439,7 @@ pub unsafe fn convert(
                     position_code: 0,
                     usb_hid: 0,
                     extra_data,
+                    is_synthetic,
                 });
             }
             _ => {}

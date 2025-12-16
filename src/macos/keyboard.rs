@@ -54,9 +54,11 @@ const optionKey: u32 = 1 << optionKeyBit;
 const controlKey: u32 = 1 << controlKeyBit;
 
 #[cfg(target_os = "macos")]
-lazy_static::lazy_static! {
-    static ref QUEUE: dispatch::Queue = dispatch::Queue::main();
-}
+use std::sync::LazyLock;
+use std::time::Duration;
+
+#[cfg(target_os = "macos")]
+static QUEUE: LazyLock<dispatch::Queue> = LazyLock::new(dispatch::Queue::main);
 
 #[cfg(target_os = "macos")]
 #[allow(clippy::duplicated_attributes)]
@@ -68,7 +70,7 @@ unsafe extern "C" {
     fn TISCopyCurrentASCIICapableKeyboardLayoutInputSource() -> TISInputSourceRef;
     // Actually return CFDataRef which is const here, but for coding convienence, return *mut c_void
     fn TISGetInputSourceProperty(source: TISInputSourceRef, property: *const c_void)
-        -> *mut c_void;
+    -> *mut c_void;
     fn UCKeyTranslate(
         layout: *const u8,
         code: u16,
@@ -85,7 +87,6 @@ unsafe extern "C" {
 }
 
 pub struct Keyboard {
-    is_main_thread: bool,
     dead_state: u32,
     shift: bool,
     alt: bool, // options
@@ -95,16 +96,11 @@ pub struct Keyboard {
 impl Keyboard {
     pub fn new() -> Option<Keyboard> {
         Some(Keyboard {
-            is_main_thread: true,
             dead_state: 0,
             shift: false,
             alt: false,
             caps_lock: false,
         })
-    }
-
-    pub fn set_is_main_thread(&mut self, b: bool) {
-        self.is_main_thread = b;
     }
 
     fn modifier_state(&self) -> ModifierState {
@@ -136,26 +132,41 @@ impl Keyboard {
 
         let modifier_state = unsafe { flags_to_state(flags_bits) };
 
-        if self.is_main_thread {
-            unsafe { self.unicode_from_code(code, modifier_state) }
-        } else {
-            QUEUE.exec_sync(move || {
-                // ignore all modifiers for name
-                unsafe { self.unicode_from_code(code, modifier_state) }
-            })
+        // Dispatch TIS* API calls to main thread for safety
+        // TIS* APIs must only be called on the main thread
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        let dead_state = self.dead_state;
+
+        QUEUE.exec_async(move || {
+            let result =
+                unsafe { Self::unicode_from_code_static(code, modifier_state, dead_state) };
+            let _ = tx.send(result);
+        });
+
+        // Wait for result with timeout to avoid blocking forever
+        match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok((unicode_info, new_dead_state)) => {
+                self.dead_state = new_dead_state;
+                unicode_info
+            }
+            Err(_) => {
+                log::warn!("Timeout waiting for unicode translation from main thread");
+                None
+            }
         }
     }
 
     #[inline]
-    unsafe fn unicode_from_code(
-        &mut self,
+    unsafe fn unicode_from_code_static(
         code: u32,
         modifier_state: ModifierState,
-    ) -> Option<UnicodeInfo> {
+        mut dead_state: u32,
+    ) -> (Option<UnicodeInfo>, u32) {
         let mut keyboard = unsafe { TISCopyCurrentKeyboardInputSource() };
         let mut layout = std::ptr::null_mut();
         if !keyboard.is_null() {
-            layout = unsafe { TISGetInputSourceProperty(keyboard, kTISPropertyUnicodeKeyLayoutData) };
+            layout =
+                unsafe { TISGetInputSourceProperty(keyboard, kTISPropertyUnicodeKeyLayoutData) };
         }
         if layout.is_null() {
             if !keyboard.is_null() {
@@ -164,7 +175,9 @@ impl Keyboard {
             // https://github.com/microsoft/vscode/issues/23833
             keyboard = unsafe { TISCopyCurrentKeyboardLayoutInputSource() };
             if !keyboard.is_null() {
-                layout = unsafe { TISGetInputSourceProperty(keyboard, kTISPropertyUnicodeKeyLayoutData) };
+                layout = unsafe {
+                    TISGetInputSourceProperty(keyboard, kTISPropertyUnicodeKeyLayoutData)
+                };
             }
         }
         if layout.is_null() {
@@ -173,50 +186,67 @@ impl Keyboard {
             }
             keyboard = unsafe { TISCopyCurrentASCIICapableKeyboardLayoutInputSource() };
             if !keyboard.is_null() {
-                layout = unsafe { TISGetInputSourceProperty(keyboard, kTISPropertyUnicodeKeyLayoutData) };
+                layout = unsafe {
+                    TISGetInputSourceProperty(keyboard, kTISPropertyUnicodeKeyLayoutData)
+                };
             }
         }
         if layout.is_null() {
             if !keyboard.is_null() {
                 unsafe { CFRelease(keyboard) };
             }
-            return None;
+            return (None, dead_state);
         }
         let layout_ptr = unsafe { CFDataGetBytePtr(layout as _) };
         if layout_ptr.is_null() {
             if !keyboard.is_null() {
                 unsafe { CFRelease(keyboard) };
             }
-            return None;
+            return (None, dead_state);
         }
 
         let mut buff = [0_u16; BUF_LEN];
         let kb_type = unsafe { super::common::LMGetKbdType() };
         let mut length = 0;
-        let _retval = unsafe { UCKeyTranslate(
-            layout_ptr,
-            code.try_into().ok()?,
-            kUCKeyActionDown,
-            modifier_state,
-            kb_type as _,
-            kUCKeyTranslateDeadKeysBit,
-            &mut self.dead_state,
-            BUF_LEN,
-            &mut length,
-            &mut buff,
-        ) };
+        let code_u16 = match code.try_into() {
+            Ok(c) => c,
+            Err(_) => {
+                if !keyboard.is_null() {
+                    unsafe { CFRelease(keyboard) };
+                }
+                return (None, dead_state);
+            }
+        };
+
+        let _retval = unsafe {
+            UCKeyTranslate(
+                layout_ptr,
+                code_u16,
+                kUCKeyActionDown,
+                modifier_state,
+                kb_type as _,
+                kUCKeyTranslateDeadKeysBit,
+                &mut dead_state,
+                BUF_LEN,
+                &mut length,
+                &mut buff,
+            )
+        };
         if !keyboard.is_null() {
             unsafe { CFRelease(keyboard) };
         }
         if length == 0 {
-            return if self.is_dead() {
-                Some(UnicodeInfo {
-                    name: None,
-                    unicode: Vec::new(),
-                    is_dead: true,
-                })
+            return if dead_state != 0 {
+                (
+                    Some(UnicodeInfo {
+                        name: None,
+                        unicode: Vec::new(),
+                        is_dead: true,
+                    }),
+                    dead_state,
+                )
             } else {
-                None
+                (None, dead_state)
             };
         }
 
@@ -226,15 +256,32 @@ impl Keyboard {
             && let Some(c) = s.chars().next()
             && ('\u{1}'..='\u{1f}').contains(&c)
         {
-            return None;
+            return (None, dead_state);
         }
 
         let unicode = buff[..length].to_vec();
-        Some(UnicodeInfo {
-            name: String::from_utf16(&unicode).ok(),
-            unicode,
-            is_dead: false,
-        })
+        (
+            Some(UnicodeInfo {
+                name: String::from_utf16(&unicode).ok(),
+                unicode,
+                is_dead: false,
+            }),
+            dead_state,
+        )
+    }
+
+    #[inline]
+    unsafe fn unicode_from_code(
+        &mut self,
+        code: u32,
+        modifier_state: ModifierState,
+    ) -> Option<UnicodeInfo> {
+        unsafe {
+            let (result, new_dead_state) =
+                Self::unicode_from_code_static(code, modifier_state, self.dead_state);
+            self.dead_state = new_dead_state;
+            result
+        }
     }
 
     pub fn is_dead(&self) -> bool {

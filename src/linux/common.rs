@@ -1,5 +1,5 @@
-use crate::linux::keyboard::Keyboard;
 use crate::keycodes::linux::key_from_code;
+use crate::linux::keyboard::Keyboard;
 use crate::rdev::{Button, Event, EventType, KeyboardState};
 use std::convert::TryInto;
 use std::os::raw::{c_int, c_uchar, c_uint};
@@ -70,6 +70,9 @@ pub fn convert(
         platform_code: code as _,
         position_code: code as _,
         usb_hid: 0,
+        // Linux does not have an API to detect synthetic events
+        // Default to false (assume hardware input)
+        is_synthetic: false,
     })
 }
 

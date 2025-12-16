@@ -1,6 +1,6 @@
 extern crate libc;
 extern crate x11;
-use crate::linux::common::{convert, FALSE, KEYBOARD};
+use crate::linux::common::{FALSE, KEYBOARD, convert};
 use crate::linux::keyboard::Keyboard;
 use crate::rdev::{Event, ListenError};
 use std::convert::TryInto;
@@ -10,18 +10,27 @@ use std::ptr::null;
 use x11::xlib;
 use x11::xrecord;
 
+use parking_lot::Mutex;
+use std::sync::OnceLock;
+
+type ListenCallbackType = Mutex<Box<dyn FnMut(Event) + Send>>;
+
 static mut RECORD_ALL_CLIENTS: c_ulong = xrecord::XRecordAllClients;
-static mut GLOBAL_CALLBACK: Option<Box<dyn FnMut(Event)>> = None;
+static GLOBAL_CALLBACK: OnceLock<ListenCallbackType> = OnceLock::new();
 
 pub fn listen<T>(callback: T) -> Result<(), ListenError>
 where
-    T: FnMut(Event) + 'static,
+    T: FnMut(Event) + Send + 'static,
 {
     let keyboard = Keyboard::new().ok_or(ListenError::KeyboardError)?;
 
+    // Initialize callback in OnceLock
+    if GLOBAL_CALLBACK.set(Mutex::new(Box::new(callback))).is_err() {
+        log::warn!("listen() called multiple times, ignoring previous callback");
+    }
+
     unsafe {
         KEYBOARD = Some(keyboard);
-        GLOBAL_CALLBACK = Some(Box::new(callback));
         // Open displays
         let dpy_control = xlib::XOpenDisplay(null());
         if dpy_control.is_null() {
@@ -92,32 +101,36 @@ struct XRecordDatum {
 unsafe extern "C" fn record_callback(
     _null: *mut c_char,
     raw_data: *mut xrecord::XRecordInterceptData,
-) { unsafe {
-    let Some(data) = raw_data.as_ref() else {
-        return;
-    };
+) {
+    unsafe {
+        let Some(data) = raw_data.as_ref() else {
+            return;
+        };
 
-    if data.category != xrecord::XRecordFromServer {
-        return;
-    }
-
-    debug_assert!(data.data_len * 4 >= std::mem::size_of::<XRecordDatum>().try_into().unwrap());
-    // Cast binary data
-    #[allow(clippy::cast_ptr_alignment)]
-    let Some(xdatum) = (data.data as *const XRecordDatum).as_ref() else {
-        return;
-    };
-
-    let code: c_uint = xdatum.code.into();
-    let type_: c_int = xdatum.type_.into();
-    // let state = xdatum.state;
-
-    let x = xdatum.root_x as f64;
-    let y = xdatum.root_y as f64;
-
-    if let Some(event) = convert(&mut *(&raw mut KEYBOARD), code, type_, x, y)
-        && let Some(callback) = &mut *(&raw mut GLOBAL_CALLBACK) {
-            callback(event);
+        if data.category != xrecord::XRecordFromServer {
+            return;
         }
-    xrecord::XRecordFreeData(raw_data);
-}}
+
+        debug_assert!(data.data_len * 4 >= std::mem::size_of::<XRecordDatum>().try_into().unwrap());
+        // Cast binary data
+        #[allow(clippy::cast_ptr_alignment)]
+        let Some(xdatum) = (data.data as *const XRecordDatum).as_ref() else {
+            return;
+        };
+
+        let code: c_uint = xdatum.code.into();
+        let type_: c_int = xdatum.type_.into();
+        // let state = xdatum.state;
+
+        let x = xdatum.root_x as f64;
+        let y = xdatum.root_y as f64;
+
+        if let Some(event) = convert(&mut *(&raw mut KEYBOARD), code, type_, x, y) {
+            if let Some(callback_mutex) = GLOBAL_CALLBACK.get() {
+                let mut callback = callback_mutex.lock();
+                callback(event);
+            }
+        }
+        xrecord::XRecordFreeData(raw_data);
+    }
+}
