@@ -1,53 +1,43 @@
+use parking_lot::Mutex;
 #[cfg(target_os = "windows")]
 use rdev::get_win_key;
 use rdev::{Event, EventType::*, Key as RdevKey, Keyboard as RdevKeyboard, KeyboardState};
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::LazyLock;
 
-lazy_static::lazy_static! {
-    static ref MUTEX_SPECIAL_KEYS: Mutex<HashMap<RdevKey, bool>> = {
-        let mut m = HashMap::new();
-        // m.insert(RdevKey::PrintScreen, false); // 无反应
-        m.insert(RdevKey::ShiftLeft, false);
-        m.insert(RdevKey::ShiftRight, false);
+static MUTEX_SPECIAL_KEYS: LazyLock<Mutex<HashMap<RdevKey, bool>>> = LazyLock::new(|| {
+    let mut m = HashMap::new();
+    m.insert(RdevKey::ShiftLeft, false);
+    m.insert(RdevKey::ShiftRight, false);
 
-        m.insert(RdevKey::ControlLeft, false);
-        m.insert(RdevKey::ControlRight, false);
+    m.insert(RdevKey::ControlLeft, false);
+    m.insert(RdevKey::ControlRight, false);
 
-        m.insert(RdevKey::Alt, false);
-        m.insert(RdevKey::AltGr, false);
+    m.insert(RdevKey::Alt, false);
+    m.insert(RdevKey::AltGr, false);
 
-        Mutex::new(m)
+    Mutex::new(m)
+});
 
-
-    };
-}
-
-#[cfg(target_os = "windows")]
-lazy_static::lazy_static! {
-    static ref KEYBOARD: Arc<Mutex<RdevKeyboard>> = Arc::new(Mutex::new(RdevKeyboard::new().unwrap()));
-}
-
-#[cfg(not(target_os = "windows"))]
-lazy_static::lazy_static! {
-    static ref KEYBOARD: Arc<Mutex<RdevKeyboard>> = Arc::new(Mutex::new(RdevKeyboard::new().unwrap()));
-}
+static KEYBOARD: LazyLock<Mutex<RdevKeyboard>> =
+    LazyLock::new(|| Mutex::new(RdevKeyboard::new().expect("Failed to create keyboard")));
 
 fn main() {
     // This will block.
     // SAFETY: This is single-threaded example code, no race conditions possible
     unsafe { std::env::set_var("KEYBOARD_ONLY", "y") };
 
-    let mut keyboard = KEYBOARD.lock().unwrap();
-    let func = move |evt: Event| {
+    let func = |evt: Event| {
         let (_key, _down) = match evt.event_type {
             KeyPress(k) => {
-                if MUTEX_SPECIAL_KEYS.lock().unwrap().contains_key(&k) {
-                    if *MUTEX_SPECIAL_KEYS.lock().unwrap().get(&k).unwrap() {
-                        return;
+                {
+                    let mut special_keys = MUTEX_SPECIAL_KEYS.lock();
+                    if special_keys.contains_key(&k) {
+                        if *special_keys.get(&k).unwrap() {
+                            return;
+                        }
+                        special_keys.insert(k, true);
                     }
-                    MUTEX_SPECIAL_KEYS.lock().unwrap().insert(k, true);
                 }
                 println!(
                     "keydown {:?} {:?} {:?}",
@@ -57,8 +47,11 @@ fn main() {
                 (k, 1)
             }
             KeyRelease(k) => {
-                if MUTEX_SPECIAL_KEYS.lock().unwrap().contains_key(&k) {
-                    MUTEX_SPECIAL_KEYS.lock().unwrap().insert(k, false);
+                {
+                    let mut special_keys = MUTEX_SPECIAL_KEYS.lock();
+                    if special_keys.contains_key(&k) {
+                        special_keys.insert(k, false);
+                    }
                 }
                 println!(
                     "keyup {:?} {:?} {:?}",
@@ -69,9 +62,12 @@ fn main() {
             _ => return,
         };
 
-        let char_s = keyboard.add(&evt.event_type).unwrap_or_default();
+        let char_s = {
+            let mut keyboard = KEYBOARD.lock();
+            keyboard.add(&evt.event_type).unwrap_or_default()
+        };
         dbg!(char_s);
-        let is_dead = keyboard.is_dead();
+        let is_dead = KEYBOARD.lock().is_dead();
         dbg!(is_dead);
 
         #[cfg(target_os = "windows")]

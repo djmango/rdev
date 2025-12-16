@@ -33,6 +33,8 @@ pub enum ListenError {
     KeyHookError(u32),
     /// Windows
     MouseHookError(u32),
+    /// All platforms - listen() was already called
+    AlreadyListening,
 }
 
 /// Errors that occur when trying to grab OS events.
@@ -62,6 +64,8 @@ pub enum GrabError {
     SimulateError,
     /// All
     ExitGrabError(String),
+    /// All platforms - grab() was already called
+    AlreadyGrabbing,
 
     IoError(std::io::Error),
 }

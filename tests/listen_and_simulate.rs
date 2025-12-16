@@ -1,19 +1,17 @@
-use lazy_static::lazy_static;
 use rdev::{Button, Event, EventType, Key, listen, simulate};
 use serial_test::serial;
 use std::error::Error;
 use std::iter::Iterator;
-use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{LazyLock, Mutex};
 use std::thread;
 use std::time::Duration;
 
-lazy_static! {
-    static ref EVENT_CHANNEL: (Mutex<Sender<Event>>, Mutex<Receiver<Event>>) = {
+static EVENT_CHANNEL: LazyLock<(Mutex<Sender<Event>>, Mutex<Receiver<Event>>)> =
+    LazyLock::new(|| {
         let (send, recv) = channel();
         (Mutex::new(send), Mutex::new(recv))
-    };
-}
+    });
 
 fn send_event(event: Event) {
     EVENT_CHANNEL

@@ -14,6 +14,7 @@ fn main() {
         position_code: 0,
         usb_hid: 0,
         extra_data: 0 as _,
+        is_synthetic: false,
     };
 
     let serialized = serde_json::to_string(&event).unwrap();

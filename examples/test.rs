@@ -7,7 +7,7 @@ use rdev::{key_from_code, linux_keycode_from_key, simulate};
 use std::{collections::HashMap, mem::zeroed, os::raw::c_int, ptr, thread, time::SystemTime};
 use std::{
     collections::HashSet,
-    sync::{Arc, Mutex, mpsc::Sender},
+    sync::{Arc, LazyLock, Mutex, mpsc::Sender},
 };
 #[cfg(target_os = "linux")]
 use strum::IntoEnumIterator;
@@ -23,10 +23,10 @@ pub static mut IS_GRAB: bool = false;
 
 static mut GLOBAL_CALLBACK: Option<Box<dyn FnMut(Event) -> Option<Event>>> = None;
 
-lazy_static::lazy_static! {
-    pub static ref GRABED: Arc<Mutex<HashSet<RdevKey>>> = Arc::new(Mutex::new(HashSet::<RdevKey>::new()));
-    pub static ref BROADCAST_CONNECT: Arc<Mutex<Option<Sender<bool>>>> = Arc::new(Mutex::new(None));
-}
+pub static GRABED: LazyLock<Arc<Mutex<HashSet<RdevKey>>>> =
+    LazyLock::new(|| Arc::new(Mutex::new(HashSet::<RdevKey>::new())));
+pub static BROADCAST_CONNECT: LazyLock<Arc<Mutex<Option<Sender<bool>>>>> =
+    LazyLock::new(|| Arc::new(Mutex::new(None)));
 
 #[cfg(target_os = "linux")]
 fn convert_event(key: RdevKey, is_press: bool) -> Event {
@@ -41,6 +41,7 @@ fn convert_event(key: RdevKey, is_press: bool) -> Event {
         platform_code: linux_keycode_from_key(key).unwrap_or_default() as _,
         position_code: linux_keycode_from_key(key).unwrap_or_default() as _,
         usb_hid: 0,
+        is_synthetic: true,
     }
 }
 

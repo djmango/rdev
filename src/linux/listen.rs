@@ -12,6 +12,7 @@ use x11::xrecord;
 
 use parking_lot::Mutex;
 use std::sync::OnceLock;
+use tracing::error;
 
 type ListenCallbackType = Mutex<Box<dyn FnMut(Event) + Send>>;
 
@@ -26,7 +27,10 @@ where
 
     // Initialize callback in OnceLock
     if GLOBAL_CALLBACK.set(Mutex::new(Box::new(callback))).is_err() {
-        log::warn!("listen() called multiple times, ignoring previous callback");
+        error!(
+            "listen() called multiple times - this is not allowed. Only one listener can be active at a time."
+        );
+        return Err(ListenError::AlreadyListening);
     }
 
     unsafe {

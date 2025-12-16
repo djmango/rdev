@@ -7,8 +7,8 @@ use crate::{
 use parking_lot::Mutex;
 use std::sync::{LazyLock, OnceLock};
 use std::{io::Error, ptr::null_mut, time::SystemTime};
+use tracing::error;
 
-type GrabCallbackType = Mutex<Box<dyn FnMut(Event) -> Option<Event> + Send>>;
 use winapi::{
     shared::{
         basetsd::ULONG_PTR,
@@ -29,8 +29,9 @@ use winapi::{
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-static GLOBAL_CALLBACK: OnceLock<Mutex<Box<dyn FnMut(Event) -> Option<Event> + Send>>> =
-    OnceLock::new();
+type GrabCallback = Mutex<Box<dyn FnMut(Event) -> Option<Event> + Send>>;
+
+static GLOBAL_CALLBACK: OnceLock<GrabCallback> = OnceLock::new();
 static GET_KEY_UNICODE: AtomicBool = AtomicBool::new(true);
 
 static CUR_HOOK_THREAD_ID: LazyLock<Mutex<DWORD>> = LazyLock::new(|| Mutex::new(0));
@@ -142,7 +143,10 @@ where
 
     // Initialize callback in OnceLock
     if GLOBAL_CALLBACK.set(Mutex::new(Box::new(callback))).is_err() {
-        log::warn!("do_hook() called multiple times, ignoring previous callback");
+        error!(
+            "grab() called multiple times - this is not allowed. Only one grab can be active at a time."
+        );
+        return Err(GrabError::AlreadyGrabbing);
     }
 
     unsafe {
@@ -157,7 +161,10 @@ where
             if hook_mouse.is_null() {
                 if FALSE == UnhookWindowsHookEx(hook_keyboard) {
                     // Fatal error
-                    log::error!("UnhookWindowsHookEx keyboard {}", Error::last_os_error());
+                    error!(
+                        "UnhookWindowsHookEx keyboard failed: {}",
+                        Error::last_os_error()
+                    );
                 }
                 return Err(GrabError::MouseHookError(GetLastError()));
             }
@@ -202,8 +209,8 @@ where
             if msg.message == WM_USER_EXIT_HOOK {
                 if !hook_keyboard.is_null() {
                     if FALSE == UnhookWindowsHookEx(hook_keyboard as _) {
-                        log::error!(
-                            "Failed UnhookWindowsHookEx keyboard {}",
+                        error!(
+                            "Failed UnhookWindowsHookEx keyboard: {}",
                             Error::last_os_error()
                         );
                         continue;
@@ -212,8 +219,8 @@ where
                 }
 
                 if !hook_mouse.is_null() && FALSE == UnhookWindowsHookEx(hook_mouse as _) {
-                    log::error!(
-                        "Failed UnhookWindowsHookEx mouse {}",
+                    error!(
+                        "Failed UnhookWindowsHookEx mouse: {}",
                         Error::last_os_error()
                     );
                     continue;

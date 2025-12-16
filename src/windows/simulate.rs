@@ -21,7 +21,6 @@ use winapi::um::winuser::{
     SendInput, VkKeyScanExW,
 };
 
-static KEYEVENTF_KEYDOWN: DWORD = 0;
 // KEYBDINPUT
 static DW_MOUSE_EXTRA_INFO: AtomicUsize = AtomicUsize::new(0);
 static DW_KEYBOARD_EXTRA_INFO: AtomicUsize = AtomicUsize::new(0);

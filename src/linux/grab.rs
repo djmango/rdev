@@ -2,7 +2,6 @@ use crate::rdev::UnicodeInfo;
 // This code is awful. Good luck
 use crate::{Event, EventType, GrabError, Keyboard, KeyboardState, key_from_code};
 use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
-use log::error;
 use mio::{Events, Interest, Poll, Token, unix::SourceFd};
 use parking_lot::Mutex;
 use std::{
@@ -16,6 +15,7 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, SystemTime},
 };
+use tracing::{debug, error};
 use x11::xlib::{self, GrabModeAsync, KeyPressMask, KeyReleaseMask, Window};
 
 use super::common::KEYBOARD;
@@ -290,7 +290,7 @@ fn start_grab_control_thread(
                 },
                 Err(e) => {
                     // Channel disconnected
-                    log::error!("Failed to receive event, {}", e);
+                    error!("Failed to receive event: {}", e);
                     break;
                 }
             }
@@ -323,7 +323,7 @@ fn loop_poll_x_event(display: Arc<Mutex<u64>>, mut poll: Poll) {
                 }
             }
             Err(e) => {
-                log::error!("Failed to poll event, {}", e);
+                error!("Failed to poll event: {}", e);
                 break;
             }
         }
@@ -345,7 +345,7 @@ fn start_grab_thread() {
             }
 
             if let Err(err) = start_grab() {
-                log::debug!("Failed to start grab keyboard, {:?}", err);
+                debug!("Failed to start grab keyboard: {:?}", err);
                 if c <= 3 {
                     c += 1;
                     thread::sleep(Duration::from_millis(100));
@@ -405,7 +405,10 @@ where
 
     // Initialize callback in OnceLock
     if GLOBAL_CALLBACK.set(Mutex::new(Box::new(callback))).is_err() {
-        log::warn!("start_grab_listen() called multiple times, ignoring previous callback");
+        error!(
+            "start_grab_listen() called multiple times - this is not allowed. Only one grab can be active at a time."
+        );
+        return Err(GrabError::AlreadyGrabbing);
     }
 
     start_grab_service()?;

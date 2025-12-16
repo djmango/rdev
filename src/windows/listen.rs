@@ -18,6 +18,7 @@ use std::{
     },
     time::SystemTime,
 };
+use tracing::{debug, error, warn};
 use winapi::{
     shared::{
         basetsd::ULONG_PTR,
@@ -109,7 +110,9 @@ const HID_USAGE_DIGITIZER_CONTACT_COUNT: u16 = 0x54;
 const HID_USAGE_GENERIC_X: u16 = 0x30;
 const HID_USAGE_GENERIC_Y: u16 = 0x31;
 
-static GLOBAL_CALLBACK: OnceLock<Mutex<Box<dyn FnMut(Event) + Send>>> = OnceLock::new();
+type ListenCallback = Mutex<Box<dyn FnMut(Event) + Send>>;
+
+static GLOBAL_CALLBACK: OnceLock<ListenCallback> = OnceLock::new();
 
 // Cache for preparsed data per device (keyed by device handle)
 static PREPARSED_DATA_CACHE: LazyLock<Mutex<HashMap<usize, Vec<u8>>>> =
@@ -640,7 +643,10 @@ where
 {
     // Initialize callback in OnceLock
     if GLOBAL_CALLBACK.set(Mutex::new(Box::new(callback))).is_err() {
-        log::warn!("listen() called multiple times, ignoring previous callback");
+        error!(
+            "listen() called multiple times - this is not allowed. Only one listener can be active at a time."
+        );
+        return Err(ListenError::AlreadyListening);
     }
 
     unsafe {
@@ -655,12 +661,12 @@ where
             // precision touchpads) - the hook also handles wheel for apps where Raw Input fails
             if let Some(hwnd) = create_hidden_window() {
                 if register_raw_input(hwnd) {
-                    log::debug!("Raw Input registered successfully for scroll events");
+                    debug!("Raw Input registered successfully for scroll events");
                 } else {
-                    log::warn!("Failed to register for Raw Input - scroll events may not work");
+                    warn!("Failed to register for Raw Input - scroll events may not work");
                 }
             } else {
-                log::warn!("Failed to create hidden window for Raw Input");
+                warn!("Failed to create hidden window for Raw Input");
             }
         }
 

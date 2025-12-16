@@ -56,6 +56,7 @@ const controlKey: u32 = 1 << controlKeyBit;
 #[cfg(target_os = "macos")]
 use std::sync::LazyLock;
 use std::time::Duration;
+use tracing::warn;
 
 #[cfg(target_os = "macos")]
 static QUEUE: LazyLock<dispatch::Queue> = LazyLock::new(dispatch::Queue::main);
@@ -150,7 +151,7 @@ impl Keyboard {
                 unicode_info
             }
             Err(_) => {
-                log::warn!("Timeout waiting for unicode translation from main thread");
+                warn!("Timeout waiting for unicode translation from main thread");
                 None
             }
         }
