@@ -360,15 +360,15 @@ unsafe fn get_preparsed_data(device_handle: usize) -> Option<PhidpPreparsedData>
             &mut preparsed_size,
         ) == u32::MAX
         {
-        return None;
-    }
+            return None;
+        }
 
-    cache.insert(device_handle, preparsed_data);
+        cache.insert(device_handle, preparsed_data);
 
-    // Return the pointer from the cache to ensure it stays valid
-    cache
-        .get(&device_handle)
-        .map(|data| data.as_ptr() as PhidpPreparsedData)
+        // Return the pointer from the cache to ensure it stays valid
+        cache
+            .get(&device_handle)
+            .map(|data| data.as_ptr() as PhidpPreparsedData)
     }
 }
 
@@ -537,15 +537,15 @@ unsafe fn parse_touchpad_with_hidp(
 /// Raw Input events always come from hardware, so is_synthetic is always false
 unsafe fn emit_raw_event(event_type: EventType) {
     let event = Event {
-            event_type,
-            time: SystemTime::now(),
-            unicode: None,
-            platform_code: 0,
-            position_code: 0,
-            usb_hid: 0,
-            extra_data: 0,
-            is_synthetic: false, // Raw Input always comes from hardware
-        };
+        event_type,
+        time: SystemTime::now(),
+        unicode: None,
+        platform_code: 0,
+        position_code: 0,
+        usb_hid: 0,
+        extra_data: 0,
+        is_synthetic: false, // Raw Input always comes from hardware
+    };
 
     if let Some(callback_mutex) = GLOBAL_CALLBACK.get() {
         let mut callback = callback_mutex.lock();
