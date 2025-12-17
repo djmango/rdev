@@ -100,11 +100,15 @@ pub unsafe fn convert(
 
         // Detect if event is synthetic (programmatically generated) by checking the source state ID.
         // Hardware events have HIDSystemState, while synthetic events have Private or CombinedSessionState.
-        let is_synthetic = CGEvent::new_source_from_event(Some(cg_event_ref))
+        let is_synthetic_by_source = CGEvent::new_source_from_event(Some(cg_event_ref))
             .map(|src| {
                 CGEventSource::source_state_id(Some(&src)) != CGEventSourceStateID::HIDSystemState
             })
             .unwrap_or(false);
+
+        // Fallback: check for enigo's EVENT_SOURCE_USER_DATA marker (100)
+        // This catches events where source info is lost after posting to HID
+        let is_synthetic = is_synthetic_by_source || extra_data == 100;
 
         match _type {
             CGEventType::LeftMouseDown => {
