@@ -161,6 +161,7 @@ fn convert_event(code: u32, is_press: bool) -> Event {
         platform_code,
         position_code: code as _,
         usb_hid: 0,
+        extra_data: 0,
         // Linux does not have an API to detect synthetic events
         is_synthetic: false,
     }

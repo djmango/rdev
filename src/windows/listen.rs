@@ -21,7 +21,6 @@ use std::{
 use tracing::{debug, error, warn};
 use winapi::{
     shared::{
-        basetsd::ULONG_PTR,
         hidusage::{HID_USAGE_GENERIC_KEYBOARD, HID_USAGE_GENERIC_MOUSE, HID_USAGE_PAGE_GENERIC},
         minwindef::{LPARAM, LRESULT, UINT, WPARAM},
         ntdef::{NTSTATUS, ULONG, USHORT},
@@ -138,7 +137,7 @@ unsafe fn raw_callback(
     code: c_int,
     param: WPARAM,
     lpdata: LPARAM,
-    f_get_extra_data: impl FnOnce(isize) -> ULONG_PTR,
+    f_get_extra_data: impl FnOnce(isize) -> i64,
     f_is_injected: impl FnOnce(isize) -> bool,
 ) -> LRESULT {
     unsafe {
@@ -174,7 +173,7 @@ unsafe extern "system" fn raw_callback_mouse(code: i32, param: usize, lpdata: is
             code,
             param,
             lpdata,
-            |data: isize| (*(data as PMOUSEHOOKSTRUCT)).dwExtraInfo,
+            |data: isize| (*(data as PMOUSEHOOKSTRUCT)).dwExtraInfo as i64,
             |data: isize| is_mouse_injected(data),
         )
     }
@@ -186,7 +185,7 @@ unsafe extern "system" fn raw_callback_keyboard(code: i32, param: usize, lpdata:
             code,
             param,
             lpdata,
-            |data: isize| (*(data as PKBDLLHOOKSTRUCT)).dwExtraInfo,
+            |data: isize| (*(data as PKBDLLHOOKSTRUCT)).dwExtraInfo as i64,
             |data: isize| is_keyboard_injected(data),
         )
     }

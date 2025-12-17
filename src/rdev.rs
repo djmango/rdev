@@ -393,9 +393,9 @@ pub struct Event {
     pub platform_code: u32,
     pub position_code: u32,
     pub usb_hid: u32,
-    #[cfg(target_os = "windows")]
-    pub extra_data: winapi::shared::basetsd::ULONG_PTR,
-    #[cfg(target_os = "macos")]
+    /// Platform-specific extra data associated with the event.
+    /// On Windows: dwExtraInfo from the hook structure (cast to i64)
+    /// On macOS: CGEventGetIntegerValueField with kCGEventSourceUserData
     pub extra_data: i64,
     /// True if this event was programmatically generated (synthetic/injected),
     /// false if it came from actual hardware input.

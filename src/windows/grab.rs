@@ -11,7 +11,6 @@ use tracing::error;
 
 use winapi::{
     shared::{
-        basetsd::ULONG_PTR,
         minwindef::{DWORD, FALSE},
         ntdef::NULL,
         windef::{HHOOK, POINT},
@@ -50,7 +49,7 @@ unsafe fn raw_callback(
     code: i32,
     param: usize,
     lpdata: isize,
-    f_get_extra_data: impl FnOnce(isize) -> ULONG_PTR,
+    f_get_extra_data: impl FnOnce(isize) -> i64,
     f_is_injected: impl FnOnce(isize) -> bool,
 ) -> isize {
     unsafe {
@@ -101,7 +100,7 @@ unsafe extern "system" fn raw_callback_mouse(code: i32, param: usize, lpdata: is
             code,
             param,
             lpdata,
-            |data: isize| (*(data as PMOUSEHOOKSTRUCT)).dwExtraInfo,
+            |data: isize| (*(data as PMOUSEHOOKSTRUCT)).dwExtraInfo as i64,
             |data: isize| is_mouse_injected(data),
         )
     }
@@ -113,7 +112,7 @@ unsafe extern "system" fn raw_callback_keyboard(code: i32, param: usize, lpdata:
             code,
             param,
             lpdata,
-            |data: isize| (*(data as PKBDLLHOOKSTRUCT)).dwExtraInfo,
+            |data: isize| (*(data as PKBDLLHOOKSTRUCT)).dwExtraInfo as i64,
             |data: isize| is_keyboard_injected(data),
         )
     }

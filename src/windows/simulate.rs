@@ -6,7 +6,7 @@ use std::mem::size_of;
 use std::ptr::null_mut;
 /// Not defined in win32 but define here for clarity
 #[allow(dead_code)]
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicI64, Ordering};
 use winapi::ctypes::c_int;
 use winapi::shared::minwindef::{DWORD, HKL, LOWORD, UINT, WORD};
 use winapi::shared::ntdef::LONG;
@@ -22,14 +22,14 @@ use winapi::um::winuser::{
 };
 
 // KEYBDINPUT
-static DW_MOUSE_EXTRA_INFO: AtomicUsize = AtomicUsize::new(0);
-static DW_KEYBOARD_EXTRA_INFO: AtomicUsize = AtomicUsize::new(0);
+static DW_MOUSE_EXTRA_INFO: AtomicI64 = AtomicI64::new(0);
+static DW_KEYBOARD_EXTRA_INFO: AtomicI64 = AtomicI64::new(0);
 
-pub fn set_mouse_extra_info(extra: usize) {
+pub fn set_mouse_extra_info(extra: i64) {
     DW_MOUSE_EXTRA_INFO.store(extra, Ordering::Relaxed);
 }
 
-pub fn set_keyboard_extra_info(extra: usize) {
+pub fn set_keyboard_extra_info(extra: i64) {
     DW_KEYBOARD_EXTRA_INFO.store(extra, Ordering::Relaxed);
 }
 
@@ -43,7 +43,7 @@ fn sim_mouse_event(flags: DWORD, data: DWORD, dx: LONG, dy: LONG) -> Result<(), 
             mouseData: data,
             dwFlags: flags,
             time: 0,
-            dwExtraInfo: DW_MOUSE_EXTRA_INFO.load(Ordering::Relaxed),
+            dwExtraInfo: DW_MOUSE_EXTRA_INFO.load(Ordering::Relaxed) as usize,
         };
         let mut input = [INPUT {
             type_: INPUT_MOUSE,
@@ -71,7 +71,7 @@ fn sim_keyboard_event(flags: DWORD, vk: WORD, scan: WORD) -> Result<(), Simulate
             wScan: scan,
             dwFlags: flags,
             time: 0,
-            dwExtraInfo: DW_KEYBOARD_EXTRA_INFO.load(Ordering::Relaxed),
+            dwExtraInfo: DW_KEYBOARD_EXTRA_INFO.load(Ordering::Relaxed) as usize,
         };
         let mut input = [INPUT {
             type_: INPUT_KEYBOARD,

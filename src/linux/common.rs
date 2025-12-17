@@ -70,6 +70,7 @@ pub fn convert(
         platform_code: code as _,
         position_code: code as _,
         usb_hid: 0,
+        extra_data: 0,
         // Linux does not have an API to detect synthetic events
         // Default to false (assume hardware input)
         is_synthetic: false,
