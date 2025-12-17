@@ -168,7 +168,9 @@ unsafe fn convert_native_with_source(
 
 unsafe fn convert_native(event_type: &EventType) -> Option<CFRetained<CGEvent>> {
     unsafe {
-        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)?;
+        // Use Private state ID so simulated events can be detected as synthetic
+        // (is_synthetic checks for source_state_id != HIDSystemState)
+        let source = CGEventSource::new(CGEventSourceStateID::Private)?;
         convert_native_with_source(event_type, &source)
     }
 }
