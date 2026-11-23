@@ -102,14 +102,6 @@ fn test_macos_keys() {
 }
 
 #[cfg(windows)]
-fn test_simulate_vk() {
-    let _ = rdev::simulate_code(Some(0xA2), None, true);
-    let _ = rdev::simulate_code(Some(0x4F), None, true);
-    let _ = rdev::simulate_code(Some(0x4F), None, false);
-    let _ = rdev::simulate_code(Some(0xA2), None, false);
-}
-
-#[cfg(windows)]
 fn test_simulate_char() {
     println!("{:?}", rdev::simulate_char('A', false));
     println!("{:?}", rdev::simulate_char('€', false));
@@ -136,9 +128,6 @@ fn main() {
     // send(&EventType::KeyRelease(Key::LeftBracket));
 
     test_simulate_dead();
-
-    // #[cfg(windows)]
-    // test_simulate_vk();
 
     #[cfg(windows)]
     test_simulate_char();

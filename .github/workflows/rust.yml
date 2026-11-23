@@ -28,7 +28,7 @@ jobs:
       - name: Build
         run: cargo build
       - name: Lint
-        run: cargo clippy --all-features -- -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Test on a private X11 display
         if: runner.os == 'Linux'
         run: xvfb-run -a -s '-screen 0 1024x768x24 -nolisten tcp' cargo test --all-features

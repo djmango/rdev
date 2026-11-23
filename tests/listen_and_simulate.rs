@@ -1,36 +1,23 @@
-use rdev::{Button, Event, EventType, Key, listen, simulate};
+use rdev::{Button, EventType, Key, listen, simulate};
 use serial_test::serial;
 use std::error::Error;
 use std::iter::Iterator;
-use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{LazyLock, Mutex};
+use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Duration;
 
-static EVENT_CHANNEL: LazyLock<(Mutex<Sender<Event>>, Mutex<Receiver<Event>>)> =
-    LazyLock::new(|| {
-        let (send, recv) = channel();
-        (Mutex::new(send), Mutex::new(recv))
-    });
-
-fn send_event(event: Event) {
-    EVENT_CHANNEL
-        .0
-        .lock()
-        .expect("Failed to unlock Mutex")
-        .send(event)
-        .expect("Receiving end of EVENT_CHANNEL was closed");
-}
-
 fn sim_then_listen(events: &mut dyn Iterator<Item = EventType>) -> Result<(), Box<dyn Error>> {
     // spawn new thread because listen blocks
+    let (sender, recv) = channel();
     let _listener = thread::spawn(move || {
-        listen(send_event).expect("Could not listen");
+        listen(move |event| {
+            let _ = sender.send(event);
+        })
+        .expect("Could not listen");
     });
     let second = Duration::from_millis(1000);
     thread::sleep(second);
 
-    let recv = EVENT_CHANNEL.1.lock()?;
     #[cfg(target_os = "linux")]
     {
         let wheel = |delta_x, delta_y| EventType::Wheel { delta_x, delta_y };

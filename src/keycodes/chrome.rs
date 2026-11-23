@@ -181,7 +181,7 @@ mod test {
             if let Some(code2) = code_from_key(key) {
                 assert_eq!(code, code2)
             } else {
-                assert!(false, "We could not convert back code: {:?}", code);
+                panic!("Could not convert back code: {code:?}");
             }
         }
     }

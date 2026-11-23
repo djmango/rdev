@@ -2,25 +2,9 @@
 use rdev::{Event, EventType, Key, grab, listen, simulate};
 use serial_test::serial;
 use std::error::Error;
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
-use std::sync::{LazyLock, Mutex};
+use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::thread;
 use std::time::Duration;
-
-static EVENT_CHANNEL: LazyLock<(Mutex<Sender<Event>>, Mutex<Receiver<Event>>)> =
-    LazyLock::new(|| {
-        let (send, recv) = channel();
-        (Mutex::new(send), Mutex::new(recv))
-    });
-
-fn send_event(event: Event) {
-    EVENT_CHANNEL
-        .0
-        .lock()
-        .expect("Failed to unlock Mutex")
-        .send(event)
-        .expect("Receiving end of EVENT_CHANNEL was closed");
-}
 
 fn grab_tab(event: Event) -> Option<Event> {
     match event.event_type {
@@ -39,16 +23,18 @@ fn test_grab() -> Result<(), Box<dyn Error>> {
     thread::sleep(Duration::from_millis(300));
 
     // spawn new thread because listen blocks
+    let (sender, recv) = channel();
     let _listener = thread::spawn(move || {
-        listen(send_event).expect("Could not listen");
+        listen(move |event| {
+            let _ = sender.send(event);
+        })
+        .expect("Could not listen");
     });
     // Make sure grab ends up on top of listen so it can properly discard.
     thread::sleep(Duration::from_secs(1));
     let _grab = thread::spawn(move || {
         grab(grab_tab).expect("Could not grab");
     });
-
-    let recv = EVENT_CHANNEL.1.lock().expect("Failed to unlock Mutex");
 
     // Wait for listen to start
     thread::sleep(Duration::from_secs(1));

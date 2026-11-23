@@ -8,17 +8,10 @@ use rdev::{disable_grab, enable_grab, exit_grab_listen, start_grab_listen};
 use std::thread;
 
 fn callback(event: Event) -> Option<Event> {
-    match event.event_type {
-        EventType::KeyPress(_key) | EventType::KeyRelease(_key) => {
-            /*  */
-            println!(
-                "name: {:?}, type: {:?}, code: {:#04X?}, scan: {:#06X?}",
-                &event.unicode, &event.event_type, &event.platform_code, &event.position_code
-            );
-            Some(event)
-        }
-        _ => Some(event),
+    if let EventType::ButtonPress(button) = event.event_type {
+        println!("Mouse button pressed: {button:?}");
     }
+    Some(event)
 }
 
 #[cfg(target_os = "linux")]
