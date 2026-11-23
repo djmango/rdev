@@ -2,47 +2,40 @@ name: build
 
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
 jobs:
   build:
-
-    runs-on: ${{matrix.os}}
-    env:
-      DISPLAY: ':99'
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      matrix: 
-        os: [macos-latest, ubuntu-latest, windows-latest]
-        include:
-        - os: ubuntu-latest
-          headless: Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
-        - os: ubuntu-latest
-          dependencies: sudo apt-get install libxtst-dev libevdev-dev --assume-yes
-        - os: macos-latest
-          # TODO: We can't test this on github, we can't set accessibility yet.
-          test: cargo test --verbose --all-features -- --skip test_listen_and_simulate --skip test_grab
-        - os: ubuntu-latest
-          # TODO unstable_grab feature is not supported on Linux.
-          test: cargo test --verbose --features=serialize
-        - os: windows-latest
-          test: cargo test --verbose --all-features
-
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-    - uses: actions/checkout@v2
-    - name: CargoFmt
-      run: rustup component add rustfmt
-    - name: Dependencies
-      run: ${{matrix.dependencies}}
-    - name: Setup headless environment
-      run: ${{matrix.headless}}
-    - name: Check formatting
-      run: |
-        rustup component add rustfmt
-        cargo fmt -- --check
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: ${{matrix.test}}
-    - name: Linter
-      run: |
-        rustup component add clippy
-        cargo clippy --all-features --verbose -- -Dwarnings
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust components
+        run: rustup component add rustfmt clippy
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Install X11 build and test dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libx11-dev libxi-dev libxtst-dev xvfb xauth
+      - name: Build
+        run: cargo build
+      - name: Lint
+        run: cargo clippy --all-features -- -D warnings
+      - name: Test on a private X11 display
+        if: runner.os == 'Linux'
+        run: xvfb-run -a -s '-screen 0 1024x768x24 -nolisten tcp' cargo test --all-features
+      - name: Test on Windows
+        if: runner.os == 'Windows'
+        run: cargo test --all-features
+      - name: Test on macOS
+        if: runner.os == 'macOS'
+        # The hosted runner cannot grant Accessibility permission for live event taps.
+        run: cargo test --all-features -- --skip test_listen_and_simulate

@@ -133,7 +133,7 @@ let string = keyboard.add(&EventType::KeyPress(Key::KeyS));
 
 ## Platform support
 
-This fork uses X11 on Linux, not Wayland or evdev. There is no `unstable_grab` Cargo feature.
+This fork uses X11 on Linux, not Wayland or evdev.
 
 ## Serialization
 

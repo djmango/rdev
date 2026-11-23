@@ -107,7 +107,7 @@
 //!
 //! # Platform support
 //!
-//! Linux uses X11, not Wayland or evdev. There is no `unstable_grab` Cargo feature.
+//! Linux uses X11, not Wayland or evdev.
 //!
 //! # Serialization
 //!
