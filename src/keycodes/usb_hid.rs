@@ -15,6 +15,8 @@ macro_rules! decl_keycodes {
         pub fn key_from_code(code: u32) -> Key {
             #[allow(unreachable_patterns)]
             match code {
+                // Zero is a placeholder, not the first unmapped key in the table.
+                0 => Key::Unknown(0),
                 $(
                     $code => Key::$key,
                 )*
@@ -28,6 +30,7 @@ macro_rules! decl_keycodes {
 
 // https://docs.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
 // https://learn.microsoft.com/en-us/windows/win32/inputdev/about-keyboard-input
+// https://www.usb.org/sites/default/files/hut1_7.pdf
 // https://download.microsoft.com/download/1/6/1/161ba512-40e2-4cc9-843a-923143f3456c/translate.pdf
 // We redefined here for Letter and number keys which are not in winapi crate (and don't have a name either in win32)
 decl_keycodes! {
@@ -152,7 +155,7 @@ decl_keycodes! {
     Kp9, 0x61,
     MetaRight, 0xE7,
     // Apps, 0xE7,
-    Apps, 0x00,
+    Apps, 0x65,
     VolumeUp, 0x80,
     VolumeDown, 0x81,
     VolumeMute, 0x7F,
@@ -173,7 +176,7 @@ decl_keycodes! {
     Help, 0x75,
     Sleep, 0x00,
     Separator, 0x9f,
-    Pause, 0x00
+    Pause, 0x48
 }
 
 #[cfg(test)]
