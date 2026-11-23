@@ -6,6 +6,21 @@ use std::ptr::null;
 use x11::xlib;
 use x11::xtest;
 
+// X11 exposes wheel clicks rather than a continuous axis. Bound the native requests per call.
+const MAX_WHEEL_STEPS: f64 = 1024.0;
+
+fn wheel_steps(delta: f64) -> Option<u16> {
+    let magnitude = delta.abs();
+    if !magnitude.is_finite() || magnitude > MAX_WHEEL_STEPS {
+        return None;
+    }
+    Some(if magnitude == 0.0 {
+        0
+    } else {
+        magnitude.round().max(1.0) as u16
+    })
+}
+
 unsafe fn send_native(event_type: &EventType, display: *mut xlib::Display) -> Option<()> {
     unsafe {
         let res = match event_type {
@@ -65,10 +80,23 @@ unsafe fn send_native(event_type: &EventType, display: *mut xlib::Display) -> Op
                 xtest::XTestFakeMotionEvent(display, 0, x, y, 0)
                 //     xlib::XWarpPointer(display, 0, root, 0, 0, 0, 0, *x as i32, *y as i32);
             }
-            EventType::Wheel { delta_y, .. } => {
-                let code = if *delta_y > 0.0 { 4 } else { 5 };
-                xtest::XTestFakeButtonEvent(display, code, TRUE, 0)
-                    & xtest::XTestFakeButtonEvent(display, code, FALSE, 0)
+            EventType::Wheel { delta_x, delta_y } => {
+                // Validate both axes before emitting any part of the event.
+                let x = wheel_steps(*delta_x)?;
+                let y = wheel_steps(*delta_y)?;
+                for (button, count) in [
+                    (if *delta_x > 0.0 { 7 } else { 6 }, x),
+                    (if *delta_y > 0.0 { 4 } else { 5 }, y),
+                ] {
+                    for _ in 0..count {
+                        let down = xtest::XTestFakeButtonEvent(display, button, TRUE, 0);
+                        let up = xtest::XTestFakeButtonEvent(display, button, FALSE, 0);
+                        if down == 0 || up == 0 {
+                            return None;
+                        }
+                    }
+                }
+                1
             }
             // Raw events are for capture only, not simulation
             EventType::MouseMoveRaw { .. }

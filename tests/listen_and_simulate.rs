@@ -31,6 +31,24 @@ fn sim_then_listen(events: &mut dyn Iterator<Item = EventType>) -> Result<(), Bo
     thread::sleep(second);
 
     let recv = EVENT_CHANNEL.1.lock()?;
+    #[cfg(target_os = "linux")]
+    {
+        let wheel = |delta_x, delta_y| EventType::Wheel { delta_x, delta_y };
+        // Invalid or empty requests must not leave a stray click in the queue.
+        assert!(simulate(&wheel(1.0, f64::INFINITY)).is_err());
+        assert!(simulate(&wheel(1025.0, 0.0)).is_err());
+        simulate(&wheel(0.0, 0.0))?;
+        simulate(&wheel(2.0, -1.0))?;
+        simulate(&wheel(-0.25, 0.0))?;
+        for expected in [
+            wheel(1.0, 0.0),
+            wheel(1.0, 0.0),
+            wheel(0.0, -1.0),
+            wheel(-1.0, 0.0),
+        ] {
+            assert_eq!(recv.recv_timeout(second)?.event_type, expected);
+        }
+    }
     for event in events {
         simulate(&event)?;
         let recieved_event = recv.recv_timeout(second).expect("No events to recieve");

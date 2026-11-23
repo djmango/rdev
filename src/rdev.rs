@@ -333,8 +333,8 @@ pub enum EventType {
     /// On Windows, raw touchpad/high-resolution scroll values are preserved as fractions.
     /// For example, a value of 0.25 means 1/4 of a line was scrolled.
     ///
-    /// Note: Linux does not support horizontal scroll. When simulating scroll on Linux,
-    /// only the sign of delta_y is considered, and not the magnitude to determine wheelup or wheeldown.
+    /// X11 simulation rounds each nonzero axis to the nearest whole click (at least one).
+    /// Zero sends no clicks; non-finite deltas and magnitudes above 1024 per axis are rejected.
     Wheel {
         delta_x: f64,
         delta_y: f64,
