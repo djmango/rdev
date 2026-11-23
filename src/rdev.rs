@@ -298,7 +298,7 @@ impl Default for RawKey {
 /// Standard mouse buttons
 /// Some mice have more than 3 buttons. These are not defined, and different
 /// OSs will give different `Button::Unknown` values.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub enum Button {
     Left,
