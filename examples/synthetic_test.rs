@@ -7,9 +7,9 @@
 //!
 //! Run with: cargo run --example synthetic_test
 
-use rdev::{listen, simulate, Event, EventType, Key};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use rdev::{Event, EventType, Key, listen, simulate};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -95,7 +95,9 @@ fn main() {
     if synthetic > 0 {
         println!("\n✓ SUCCESS: Simulated events were correctly detected as synthetic!");
     } else {
-        println!("\n✗ FAILURE: No synthetic events detected. is_synthetic detection may be broken.");
+        println!(
+            "\n✗ FAILURE: No synthetic events detected. is_synthetic detection may be broken."
+        );
     }
 
     println!("\nNote: You may also see hardware events if you pressed keys during the test.");
@@ -106,4 +108,3 @@ fn main() {
         thread::sleep(Duration::from_secs(1));
     }
 }
-
