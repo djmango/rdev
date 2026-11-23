@@ -4,7 +4,6 @@ use crate::linux::common::{FALSE, KEYBOARD, convert};
 use crate::linux::keyboard::Keyboard;
 use crate::rdev::{Event, ListenError};
 use std::convert::TryInto;
-use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_uchar, c_uint, c_ulong};
 use std::ptr::null;
 use x11::xlib;
@@ -34,14 +33,13 @@ where
     }
 
     unsafe {
-        KEYBOARD = Some(keyboard);
+        *KEYBOARD.lock() = Some(keyboard);
         // Open displays
         let dpy_control = xlib::XOpenDisplay(null());
         if dpy_control.is_null() {
             return Err(ListenError::MissingDisplayError);
         }
-        let extension_name = CStr::from_bytes_with_nul(b"RECORD\0")
-            .map_err(|_| ListenError::XRecordExtensionError)?;
+        let extension_name = c"RECORD";
         let extension = xlib::XInitExtension(dpy_control, extension_name.as_ptr());
         if extension.is_null() {
             return Err(ListenError::XRecordExtensionError);
@@ -129,7 +127,8 @@ unsafe extern "C" fn record_callback(
         let x = xdatum.root_x as f64;
         let y = xdatum.root_y as f64;
 
-        if let Some(event) = convert(&mut *(&raw mut KEYBOARD), code, type_, x, y) {
+        let event = convert(&mut KEYBOARD.lock(), code, type_, x, y);
+        if let Some(event) = event {
             if let Some(callback_mutex) = GLOBAL_CALLBACK.get() {
                 let mut callback = callback_mutex.lock();
                 callback(event);

@@ -8,7 +8,9 @@ use std::ptr::{NonNull, null, null_mut};
 use x11::xlib::{self, KeySym, XKeyEvent, XKeysymToString, XSupportsLocale};
 
 #[derive(Debug)]
-pub struct MyXIM(xlib::XIM);
+pub struct MyXIM {
+    _handle: xlib::XIM,
+}
 unsafe impl Sync for MyXIM {}
 unsafe impl Send for MyXIM {}
 
@@ -119,7 +121,7 @@ impl Keyboard {
             xlib::XSetICFocus(xic);
 
             Some(Keyboard {
-                xim: Box::new(MyXIM(xim)),
+                xim: Box::new(MyXIM { _handle: xim }),
                 xic: Box::new(MyXIC(xic)),
                 display: Box::new(MyDisplay(dpy)),
                 window: Box::new(window),
@@ -214,7 +216,7 @@ impl Keyboard {
             );
 
             let keysym = xlookup_string(&mut key);
-            self.keysym = Box::new(keysym);
+            *self.keysym = keysym;
             if self.is_dead() {
                 return Some(UnicodeInfo {
                     name: None,

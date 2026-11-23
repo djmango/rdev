@@ -11,7 +11,7 @@ pub const TRUE: c_int = 1;
 pub const FALSE: c_int = 0;
 
 // A global for the callbacks.
-pub static mut KEYBOARD: Option<Keyboard> = None;
+pub static KEYBOARD: parking_lot::Mutex<Option<Keyboard>> = parking_lot::Mutex::new(None);
 
 pub fn convert_event(code: c_uchar, type_: c_int, x: f64, y: f64) -> Option<EventType> {
     match type_ {

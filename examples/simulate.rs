@@ -116,14 +116,6 @@ fn test_simulate_char() {
     println!("{:?}", rdev::simulate_char('€', true));
 }
 
-#[cfg(target_os = "linux")]
-fn simulate_combination() {
-    send(&EventType::KeyPress(Key::ControlLeft));
-    rdev::simulate_char('€', true);
-    rdev::simulate_char('€', false);
-    send(&EventType::KeyRelease(Key::ControlLeft));
-}
-
 fn test_simulate_dead() {
     send(&EventType::KeyPress(Key::AltGr));
     send(&EventType::KeyPress(Key::KeyE));
@@ -142,9 +134,6 @@ fn main() {
 
     // send(&EventType::KeyPress(Key::LeftBracket));
     // send(&EventType::KeyRelease(Key::LeftBracket));
-
-    // #[cfg(target_os = "linux")]
-    // simulate_combination();
 
     test_simulate_dead();
 

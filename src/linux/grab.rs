@@ -1,7 +1,7 @@
 use crate::rdev::UnicodeInfo;
 // This code is awful. Good luck
 use crate::{Event, EventType, GrabError, Keyboard, KeyboardState, key_from_code};
-use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
+use crossbeam_channel::{Receiver, Sender, unbounded};
 use mio::{Events, Interest, Poll, Token, unix::SourceFd};
 use parking_lot::Mutex;
 use std::{
@@ -140,8 +140,8 @@ fn convert_event(code: u32, is_press: bool) -> Event {
         EventType::KeyRelease(key)
     };
 
-    let (unicode, platform_code) = unsafe {
-        if let Some(kbd) = &mut *(&raw mut KEYBOARD) {
+    let (unicode, platform_code) = {
+        if let Some(kbd) = KEYBOARD.lock().as_mut() {
             // delete -> \u{7f}
             let unicode_info = kbd.add(&event_type);
             if is_control(&unicode_info) {
@@ -170,7 +170,7 @@ fn convert_event(code: u32, is_press: bool) -> Event {
 fn grab_keys(display: Arc<Mutex<u64>>, grab_window: libc::c_ulong) {
     unsafe {
         // Minimize lock duration - don't hold during sleep
-        let display_ptr = {
+        {
             let lock = display.lock();
             let display_ptr = *lock as *mut xlib::Display;
             xlib::XGrabKeyboard(
@@ -182,24 +182,21 @@ fn grab_keys(display: Arc<Mutex<u64>>, grab_window: libc::c_ulong) {
                 xlib::CurrentTime,
             );
             xlib::XFlush(display_ptr);
-            display_ptr
-        };
+        }
         // Lock released here before sleep
         thread::sleep(Duration::from_millis(50));
     }
 }
 
 fn ungrab_keys(display: Arc<Mutex<u64>>) {
-    unsafe {
-        // Minimize lock duration - don't hold during sleep
-        {
-            let lock = display.lock();
-            let display = *lock as *mut xlib::Display;
-            ungrab_keys_(display);
-        }
-        // Lock released here before sleep
-        thread::sleep(Duration::from_millis(50));
+    // Minimize lock duration - don't hold during sleep
+    {
+        let lock = display.lock();
+        let display = *lock as *mut xlib::Display;
+        ungrab_keys_(display);
     }
+    // Lock released here before sleep
+    thread::sleep(Duration::from_millis(50));
 }
 
 fn ungrab_keys_(display: *mut xlib::Display) {
@@ -238,15 +235,7 @@ fn start_grab_service() -> Result<(), GrabError> {
     let (tx, rx) = unbounded::<GrabEvent>();
     *GRAB_KEY_EVENT_SENDER.lock() = Some(tx);
 
-    unsafe {
-        // to-do: is display pointer in keyboard always valid?
-        // KEYBOARD usage is very confusing and error prone.
-        KEYBOARD = Keyboard::new();
-        if (*&raw const KEYBOARD).is_none() {
-            return Err(GrabError::KeyboardError);
-        }
-    }
-
+    *KEYBOARD.lock() = Some(Keyboard::new().ok_or(GrabError::KeyboardError)?);
     start_grab_thread();
     start_callback_event_thread(rx);
     Ok(())
