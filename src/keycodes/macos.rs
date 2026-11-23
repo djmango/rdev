@@ -5,6 +5,17 @@ use crate::rdev::Key;
 
 pub use super::macos_virtual_keycodes as virtual_keycodes;
 
+// Quartz may carry NumericPad from a previous keypad event into a simulated text key.
+// Work on the raw bits so other modifiers, including unknown system flags, survive.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn simulated_text_flags(code: CGKeyCode, flags: u64, numeric_pad: u64) -> u64 {
+    let text = matches!(
+        code,
+        kVK_ANSI_A..=kVK_ANSI_Grave | kVK_JIS_Yen | kVK_JIS_Underscore
+    ) && !matches!(code, kVK_Return | kVK_Tab);
+    if text { flags & !numeric_pad } else { flags }
+}
+
 macro_rules! decl_keycodes {
     ($($key:ident, $code:ident),*) => {
         //TODO: make const when rust lang issue #49146 is fixed
@@ -174,5 +185,31 @@ mod test {
                 None => panic!("Could not convert back code: {:?}", code),
             }
         }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn simulated_text_keys_clear_only_the_keypad_bit() {
+    let pad = 1 << 21;
+    let other = (1 << 17) | (1 << 23) | (1 << 47);
+    for code in [
+        kVK_ANSI_A,
+        kVK_ANSI_Quote,
+        kVK_ISO_Section,
+        kVK_JIS_Yen,
+        kVK_JIS_Underscore,
+    ] {
+        assert_eq!(simulated_text_flags(code, pad | other, pad), other);
+        assert_eq!(simulated_text_flags(code, other, pad), other);
+    }
+    for code in [
+        kVK_ANSI_Keypad0,
+        kVK_F11,
+        kVK_LeftArrow,
+        kVK_Return,
+        kVK_Tab,
+    ] {
+        assert_eq!(simulated_text_flags(code, pad | other, pad), pad | other);
     }
 }

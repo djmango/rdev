@@ -1,4 +1,4 @@
-use crate::keycodes::macos::{code_from_key, virtual_keycodes::*};
+use crate::keycodes::macos::{code_from_key, simulated_text_flags, virtual_keycodes::*};
 use crate::rdev::{Button, EventType, RawKey, SimulateError};
 use objc2_core_foundation::{CFRetained, CGPoint};
 use objc2_core_graphics::{
@@ -66,51 +66,25 @@ unsafe fn convert_native_with_source(
 ) -> Option<CFRetained<CGEvent>> {
     unsafe {
         match event_type {
-            EventType::KeyPress(key) => match key {
-                crate::Key::RawKey(rawkey) => {
-                    if let RawKey::MacVirtualKeycode(keycode) = rawkey {
-                        let event = CGEvent::new_keyboard_event(Some(source), *keycode, true)?;
-                        // Apply current modifier flags from atomic
-                        let flags =
-                            objc2_core_graphics::CGEventFlags(LAST_FLAGS.load(Ordering::Acquire));
-                        CGEvent::set_flags(Some(&event), flags);
-                        Some(event)
-                    } else {
-                        None
-                    }
-                }
-                _ => {
-                    let code = code_from_key(*key)?;
-                    let event = CGEvent::new_keyboard_event(Some(source), code, true)?;
-                    let flags =
-                        objc2_core_graphics::CGEventFlags(LAST_FLAGS.load(Ordering::Acquire));
-                    CGEvent::set_flags(Some(&event), flags);
-                    Some(event)
-                }
-            },
-            EventType::KeyRelease(key) => match key {
-                crate::Key::RawKey(rawkey) => {
-                    if let RawKey::MacVirtualKeycode(keycode) = rawkey {
-                        let event = CGEvent::new_keyboard_event(Some(source), *keycode, false)?;
-                        let flags =
-                            objc2_core_graphics::CGEventFlags(LAST_FLAGS.load(Ordering::Acquire));
-                        CGEvent::set_flags(Some(&event), flags);
-                        workaround_fn(&event, *keycode);
-                        Some(event)
-                    } else {
-                        None
-                    }
-                }
-                _ => {
-                    let code = code_from_key(*key)?;
-                    let event = CGEvent::new_keyboard_event(Some(source), code, false)?;
-                    let flags =
-                        objc2_core_graphics::CGEventFlags(LAST_FLAGS.load(Ordering::Acquire));
-                    CGEvent::set_flags(Some(&event), flags);
+            EventType::KeyPress(key) | EventType::KeyRelease(key) => {
+                let code = match key {
+                    crate::Key::RawKey(RawKey::MacVirtualKeycode(code)) => *code,
+                    crate::Key::RawKey(_) => return None,
+                    key => code_from_key(*key)?,
+                };
+                let down = matches!(event_type, EventType::KeyPress(_));
+                let event = CGEvent::new_keyboard_event(Some(source), code, down)?;
+                let flags = simulated_text_flags(
+                    code,
+                    LAST_FLAGS.load(Ordering::Acquire),
+                    CGEventFlags::MaskNumericPad.0,
+                );
+                CGEvent::set_flags(Some(&event), CGEventFlags(flags));
+                if !down {
                     workaround_fn(&event, code);
-                    Some(event)
                 }
-            },
+                Some(event)
+            }
             EventType::ButtonPress(button) => {
                 let point = get_current_mouse_location()?;
                 let event_type = match button {
