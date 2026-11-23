@@ -113,7 +113,7 @@ impl std::error::Error for SimulateError {}
 /// Careful, on Windows KpReturn does not exist, it' s strictly equivalent to Return, also Keypad keys
 /// get modified if NumLock is Off and ARE pagedown and so on.
 use strum_macros::EnumIter; // 0.17.1
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, EnumIter)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumIter)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub enum Key {
     /// Alt key on Linux and Windows (option key on macOS)
@@ -279,7 +279,7 @@ pub type KeyCode = u32;
 #[cfg(target_os = "macos")]
 pub type KeyCode = crate::CGKeyCode;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, EnumIter)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumIter)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub enum RawKey {
     ScanCode(KeyCode),
