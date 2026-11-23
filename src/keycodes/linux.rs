@@ -157,7 +157,9 @@ decl_keycodes!(
     Lang2, 0x0064,
     Lang3, 0x0062,
     Lang4, 0x0063,
-    Lang5, 0x005d
+    Lang5, 0x005d,
+    Hangul, 0x0082,
+    Hanja, 0x0083
 );
 
 #[cfg(test)]
