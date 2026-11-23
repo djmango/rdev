@@ -416,6 +416,9 @@ pub struct Event {
 /// ```no_run
 /// use rdev::{Keyboard, EventType, Key, KeyboardState};
 ///
+/// #[cfg(target_os = "windows")]
+/// let mut keyboard = Keyboard::new();
+/// #[cfg(not(target_os = "windows"))]
 /// let mut keyboard = Keyboard::new().unwrap();
 /// let string = keyboard.add(&EventType::KeyPress(Key::KeyS)).unwrap().name.unwrap();
 /// // string == Some("s")

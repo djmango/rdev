@@ -1,22 +1,20 @@
-use rdev::listen;
-use std::thread;
+use rdev::{EventType, listen};
 use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() {
-    // spawn new thread because listen blocks
-    let (schan, mut rchan) = mpsc::unbounded_channel();
-    let _listener = thread::spawn(move || {
-        listen(move |event| {
-            schan
-                .send(event)
-                .unwrap_or_else(|e| println!("Could not send event {:?}", e));
-        })
-        .expect("Could not listen");
+    let (sender, mut receiver) = mpsc::channel(32);
+    tokio::spawn(async move {
+        while let Some(button) = receiver.recv().await {
+            println!("Mouse button pressed: {button:?}");
+        }
     });
 
-    loop {
-        let event = rchan.recv().await;
-        println!("Received {:?}", event);
-    }
+    // Keep the native event loop on the main thread. Don't block it on a slow reader.
+    listen(move |event| {
+        if let EventType::ButtonPress(button) = event.event_type {
+            let _ = sender.try_send(button);
+        }
+    })
+    .expect("Could not listen");
 }

@@ -1,18 +1,17 @@
-use lazy_static::lazy_static;
+#![cfg(target_os = "windows")]
 use rdev::{Event, EventType, Key, grab, listen, simulate};
 use serial_test::serial;
 use std::error::Error;
-use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
+use std::sync::{LazyLock, Mutex};
 use std::thread;
 use std::time::Duration;
 
-lazy_static! {
-    static ref EVENT_CHANNEL: (Mutex<Sender<Event>>, Mutex<Receiver<Event>>) = {
+static EVENT_CHANNEL: LazyLock<(Mutex<Sender<Event>>, Mutex<Receiver<Event>>)> =
+    LazyLock::new(|| {
         let (send, recv) = channel();
         (Mutex::new(send), Mutex::new(recv))
-    };
-}
+    });
 
 fn send_event(event: Event) {
     EVENT_CHANNEL
@@ -32,6 +31,7 @@ fn grab_tab(event: Event) -> Option<Event> {
 }
 
 #[test]
+#[ignore = "requires an isolated Windows desktop and temporarily suppresses Tab"]
 #[serial]
 fn test_grab() -> Result<(), Box<dyn Error>> {
     // Wait for tester's key to go back up
